@@ -4,6 +4,7 @@ import time
 import paramiko
 import json
 import posixpath
+import shlex
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils import pipeline_constants as consts
@@ -233,13 +234,21 @@ class ClusterJob:
     def run_job(self):
         ssh = SSH_connection()
 
-        params_dir = os.path.dirname(self.params)
-        pipeline_dir = os.path.dirname(params_dir)
+        params_dir = posixpath.dirname(self.params)
+        pipeline_dir = posixpath.dirname(params_dir)
+        script_dir = posixpath.dirname(self.script)
+        steps_dir = posixpath.dirname(script_dir)
         step_name = os.path.basename(self.script).replace(".sh", "")
         log_file_linux = posixpath.join(params_dir, f"{step_name}_%j.log")
 
         ssh.run_command(f"mkdir -p {pipeline_dir}")
-        command = " ".join([self.run_job_command, f"--output={log_file_linux}", self.script, self.params])
+        command = " ".join([
+            self.run_job_command,
+            f"--chdir={shlex.quote(steps_dir)}",
+            f"--output={shlex.quote(log_file_linux)}",
+            shlex.quote(self.script),
+            shlex.quote(self.params),
+        ])
         print("Submitting job:", command)
         output = ssh.run_command(command)
 

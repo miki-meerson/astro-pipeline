@@ -14,6 +14,4 @@ echo "bashrc sourced"
 . ${HOME}/miniconda3/bin/activate suite2p
 echo "suite2p env activated"
 
-CODE_DIR='/ems/elsc-labs/adam-y/Adam-Lab-Shared/FromExperimentToAnalysis/Miki/source/pipeline_steps'
-cd $CODE_DIR
 python suite2p_extraction.py "$PARAMS_FILE"
