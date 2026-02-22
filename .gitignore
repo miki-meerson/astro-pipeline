@@ -1,3 +1,4 @@
 metadata/ 
 *.pyc 
 utils/miki_credentials.py 
+utils/credentials_miki.py 
