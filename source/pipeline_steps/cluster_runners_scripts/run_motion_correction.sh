@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH -J MC
 #SBATCH -N 1
-#SBATCH -c 32
+#SBATCH -c 16
 #SBATCH -t 0-1:00:00
-#SBATCH --mem=256G
+#SBATCH --mem=128G
 #SBATCH --mail-type=END
 
 PARAMS_FILE=${1:-"None"}
