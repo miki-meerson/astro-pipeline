@@ -23,7 +23,7 @@ def extract_params(gui_param_path):
 
     pipeline_dir = pipe_utils.get_pipeline_results_dir(raw_video_path)
     gui_time = gui_params[consts.GUI_TIME]
-    clean_start_frame = gui_params[consts.CLEAN_START_FRAME]
+    trimmed = gui_params.get(consts.TRIMMED, 3000)
     mc_dir = os.path.join(pipeline_dir, consts.MC_DIR)
     split_2ch_flag = gui_params.get(consts.SPLIT_2CH, False)
 
@@ -39,7 +39,7 @@ def extract_params(gui_param_path):
             "full": os.path.join(mc_dir, consts.MC_VIDEO_PATH)
         }
 
-    return raw_video_path, mc_video_paths, channels, gui_time, fr, clean_start_frame
+    return raw_video_path, mc_video_paths, channels, gui_time, fr, trimmed
 
 
 def run_photobleaching_correction(fr, start_frame, stop_frame, mc_path):
@@ -187,7 +187,7 @@ def save_pb_qc(pipeline_dir, pb_correct_dict, channel_name=None):
 
 def main(args):
     gui_params_path = args[1]
-    raw_video_path, mc_video_paths, channels, gui_time, fr, clean_start_frame = extract_params(gui_params_path)
+    raw_video_path, mc_video_paths, channels, gui_time, fr, trimmed = extract_params(gui_params_path)
     print("GUI TIME:", gui_time)
     pipeline_dir = pipe_utils.get_pipeline_results_dir(raw_video_path)
 
@@ -197,7 +197,7 @@ def main(args):
 
         movie_clean, pb_correct_dict = run_photobleaching_correction(
             fr,
-            start_frame=clean_start_frame,
+            start_frame=trimmed,
             stop_frame=None,
             mc_path=mc_video_path
         )

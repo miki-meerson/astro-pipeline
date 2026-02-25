@@ -4,6 +4,9 @@ import sys
 import subprocess
 import datetime
 import json
+import numpy as np
+import pandas as pd
+import tifffile
 from streamlit_autorefresh import st_autorefresh
 import glob
 import tkinter as tk
@@ -21,6 +24,11 @@ NUMBER_INPUT = "number_input"
 BOOLEAN_INPUT = "boolean_input"
 LIST_INPUT = "list_input"
 MC_PARAMS_TITLE = "**Motion Correction Parameters**"
+PB_PARAMS_TITLE = "**Photobleaching Correction Parameters**"
+MAX_TRACE_POINTS = 1200
+SPATIAL_DOWNSAMPLE = 8
+TRIMMED_INPUT_KEY = "trimmed_input"
+TRIMMED_SLIDER_KEY = "trimmed_slider"
 
 ########## initialization ###########
 class GUI_parameter:
@@ -106,6 +114,10 @@ def init_session_state():
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+    if TRIMMED_INPUT_KEY not in st.session_state:
+        st.session_state[TRIMMED_INPUT_KEY] = 3000
+    if "pb_trace_loaded" not in st.session_state:
+        st.session_state["pb_trace_loaded"] = False
 
     tab_keys = list(pipeline_registry.TABS_REGISTRY.keys())
     tab_display_names = [
@@ -141,26 +153,165 @@ def display_mc_params():
     return
 
 
+def display_pb_params():
+    with st.expander(PB_PARAMS_TITLE):
+        raw_path = st.session_state.get(consts.RAW_VIDEO_PATH, "")
+        st.number_input(
+            consts.TRIMMED,
+            key=TRIMMED_INPUT_KEY,
+            min_value=0,
+            step=1,
+            on_change=_sync_slider_from_input
+        )
+
+        if not raw_path or not os.path.exists(raw_path):
+            st.caption("Select a movie path to preview mean intensity.")
+            return
+
+        if st.button("Load/Refresh mean-intensity preview", key="load_pb_trace_btn"):
+            st.session_state["pb_trace_loaded"] = True
+
+        if not st.session_state.get("pb_trace_loaded", False):
+            st.caption("Preview is on-demand to keep the GUI responsive.")
+            return
+
+        try:
+            with st.spinner("Computing mean-intensity trace..."):
+                n_frames, sampled_frames, sampled_mean = _compute_mean_trace(
+                    raw_path,
+                    os.path.getmtime(raw_path),
+                    os.path.getsize(raw_path)
+                )
+
+            max_frame = max(0, n_frames - 1)
+            current_trimmed = int(st.session_state.get(TRIMMED_INPUT_KEY, 3000))
+            current_trimmed = max(0, min(current_trimmed, max_frame))
+
+            if TRIMMED_SLIDER_KEY not in st.session_state:
+                st.session_state[TRIMMED_SLIDER_KEY] = current_trimmed
+            st.session_state[TRIMMED_SLIDER_KEY] = max(0, min(int(st.session_state[TRIMMED_SLIDER_KEY]), max_frame))
+
+            selected_frame = st.slider(
+                "Trim first frames",
+                min_value=0,
+                max_value=max_frame,
+                step=1,
+                key=TRIMMED_SLIDER_KEY,
+                on_change=_sync_input_from_slider
+            )
+            selected_frame = int(selected_frame)
+
+            trace_df = pd.DataFrame({
+                "frame": sampled_frames.astype(int),
+                "mean_intensity": sampled_mean.astype(float)
+            }).set_index("frame")
+            st.line_chart(trace_df)
+
+            nearest_idx = int(np.argmin(np.abs(sampled_frames - selected_frame)))
+            selected_mean = float(sampled_mean[nearest_idx])
+            removed_pct = (selected_frame / max(1, n_frames - 1)) * 100.0
+            st.caption(
+                f"Selected trim frame: {selected_frame} / {n_frames - 1} "
+                f"(~{removed_pct:.1f}% removed), mean intensity near selection: {selected_mean:.2f}"
+            )
+        except Exception as e:
+            st.warning(f"Could not compute mean-intensity trace: {e}")
+    return
+
+
+@st.cache_data(show_spinner=False)
+def _compute_mean_trace(raw_path, _mtime, _size):
+    if raw_path.lower().endswith(".raw"):
+        n_frames, sampled_frames, sampled_mean = _mean_trace_from_raw(raw_path)
+        return n_frames, sampled_frames, sampled_mean
+    if raw_path.lower().endswith(".tif") or raw_path.lower().endswith(".tiff"):
+        n_frames, sampled_frames, sampled_mean = _mean_trace_from_tif(raw_path)
+        return n_frames, sampled_frames, sampled_mean
+    raise ValueError("Unsupported file format. Use .raw or .tif/.tiff")
+
+
+def _sync_input_from_slider():
+    if TRIMMED_SLIDER_KEY in st.session_state:
+        st.session_state[TRIMMED_INPUT_KEY] = int(st.session_state[TRIMMED_SLIDER_KEY])
+
+
+def _sync_slider_from_input():
+    trimmed_value = int(st.session_state.get(TRIMMED_INPUT_KEY, 0))
+    if TRIMMED_SLIDER_KEY in st.session_state:
+        st.session_state[TRIMMED_SLIDER_KEY] = max(0, trimmed_value)
+
+
+def _mean_trace_from_raw(raw_path):
+    width, height = pipe_utils.get_raw_video_dimensions(raw_path)
+    itemsize = np.dtype(np.uint16).itemsize
+    total_bytes = os.path.getsize(raw_path)
+    frame_size_bytes = width * height * itemsize
+    if frame_size_bytes == 0:
+        raise ValueError("Raw video dimensions are invalid (zero frame size).")
+    n_frames = total_bytes // frame_size_bytes
+    if n_frames <= 0:
+        raise ValueError("Raw video has no frames.")
+
+    mm = np.memmap(raw_path, dtype=np.uint16, mode="r", shape=(n_frames, height, width))
+    temporal_step = max(1, int(np.ceil(n_frames / MAX_TRACE_POINTS)))
+    sampled_frames = np.arange(0, n_frames, temporal_step, dtype=np.int64)
+    sampled_movie = mm[::temporal_step, ::SPATIAL_DOWNSAMPLE, ::SPATIAL_DOWNSAMPLE]
+    sampled_mean = sampled_movie.mean(axis=(1, 2))
+    return int(n_frames), sampled_frames, sampled_mean
+
+
+def _mean_trace_from_tif(tif_path):
+    try:
+        movie = tifffile.memmap(tif_path)
+    except Exception:
+        movie = tifffile.imread(tif_path)
+    if movie.ndim != 3:
+        raise ValueError(f"Expected 3D movie, got shape {movie.shape}")
+
+    n_frames = int(movie.shape[0])
+    temporal_step = max(1, int(np.ceil(n_frames / MAX_TRACE_POINTS)))
+    sampled_frames = np.arange(0, n_frames, temporal_step, dtype=np.int64)
+    sampled_movie = movie[::temporal_step, ::SPATIAL_DOWNSAMPLE, ::SPATIAL_DOWNSAMPLE]
+    sampled_mean = sampled_movie.mean(axis=(1, 2))
+    return n_frames, sampled_frames, sampled_mean
+
+
 def choose_file():
+    root = None
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes('-topmost', 1)
+        root.update()
+        path = filedialog.askopenfilename(master=root)
 
-    root = tk.Tk()
-    root.withdraw()
-    root.wm_attributes('-topmost', 1)
-    path = filedialog.askopenfilename(master=root)
+        if not path:
+            st.session_state["browse_status"] = "No file selected."
+            return
 
-    if path:
         st.session_state["raw_video_path"] = path
+        st.session_state["pb_trace_loaded"] = False
+        st.session_state.pop(TRIMMED_SLIDER_KEY, None)
 
         cage, mouse_name, fov, date, behavior, exp_details = pipe_utils.get_video_details(path)
 
         st.session_state.update({
-            consts.CAGE: cage,
-            consts.MOUSE_NAME: mouse_name,
-            consts.EXPERIMENT_DATE: date,
-            consts.FOV: fov,
-            consts.BEHAVIOR: behavior,
-            consts.EXPERIMENT_DETAILS: exp_details,
+            consts.CAGE: cage or "",
+            consts.MOUSE_NAME: mouse_name or "",
+            consts.EXPERIMENT_DATE: date or "",
+            consts.FOV: fov or "",
+            consts.BEHAVIOR: behavior or "",
+            consts.EXPERIMENT_DETAILS: exp_details or "",
         })
+        st.session_state["browse_status"] = f"Selected: {os.path.basename(path)}"
+    except Exception as e:
+        st.session_state["browse_status"] = f"Browse failed: {e}"
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
 
 def display_video_input():
@@ -172,6 +323,8 @@ def display_video_input():
         st.write("")
         st.write("")
         st.button('**_Browse_**', on_click=choose_file)
+    if "browse_status" in st.session_state and st.session_state["browse_status"]:
+        st.caption(st.session_state["browse_status"])
 
 
 def display_mouse_details():
@@ -233,6 +386,7 @@ def _get_gui_params_from_session():
 
         for k, v in st.session_state.items():
             gui_params[k] = data_utils.serialize_value(v)
+        gui_params[consts.TRIMMED] = int(st.session_state.get(TRIMMED_INPUT_KEY, 3000))
 
         return gui_params
 
@@ -243,7 +397,6 @@ def _create_gui_params(gui_params):
     gui_params[consts.RAW_VIDEO_PATH_LINUX] = pipe_utils.windows_to_linux_path(gui_params[consts.RAW_VIDEO_PATH])
     gui_params[consts.HOME_DIR_LINUX] = os.path.split(gui_params[consts.RAW_VIDEO_PATH_LINUX])[0]
     gui_params[consts.HOME_DIR] = os.path.split(gui_params[consts.RAW_VIDEO_PATH])[0]
-    gui_params[consts.CLEAN_START_FRAME] = 3000
     return gui_params
 
 
@@ -361,6 +514,7 @@ def display_run_pipeline_tab(run_pipeline_tab, session_time):
         with cols[1]:
             display_mc_params()
             display_video_input()
+            display_pb_params()
             display_mouse_details()
             display_pipeline_steps()
             run_pipeline_logic(session_time)

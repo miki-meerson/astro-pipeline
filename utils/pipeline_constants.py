@@ -85,9 +85,9 @@ OVERLAPS = "overlaps"
 OVERLAPS_X = "overlaps_x"
 OVERLAPS_Y = "overlaps_y"
 MAX_DEVIATION_RIGID = "max_deviation_rigid"
-
-### photobleaching correction ###
-CLEAN_START_FRAME = "clean_start_frame"
+MEAN_XY_SHIFT = "mean_xy_shift"
+MAX_SHIFT = "max_shift"
+STD_SHIFT = "std_shift"
 
 ### columns names ###
 EXPERIMENT_DATE = "experiment_date"
@@ -105,10 +105,6 @@ HEIGHT = "height"
 FRAMES_NUMBER = "frames_number"
 ORIGINAL_MEAN_INTENSITY = "original_mean_intensity"
 
-### motion correction ###
-MEAN_XY_SHIFT = "mean_xy_shift"
-MAX_SHIFT = "max_shift"
-STD_SHIFT = "std_shift"
 
 ### photobleaching metrics - I(t)=A⋅e^(−t/τ)+C, corrected_mean(t)=mt+b ###
 TRIMMED = "trimmed"
