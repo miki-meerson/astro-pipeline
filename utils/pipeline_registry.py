@@ -1,4 +1,3 @@
-from source.gui import display_run_pipeline_tab
 from utils import files_paths as paths
 from utils import pipeline_constants as consts
 import os
@@ -30,10 +29,20 @@ STEPS_REGISTRY = {
     },
 }
 
+ANALYSIS_STEPS_REGISTRY = {
+    consts.PCA_COMPUTATION: {
+        "script": os.path.join(paths.CLUSTER_RUNNERS_DIR, paths.PCA_BASH),
+        "display_name": "**PCA**",
+        "default": False,
+    },
+}
+
 TABS_REGISTRY = {
     consts.RUN: {
         "display_name": "**_Run_**",
-        "render": display_run_pipeline_tab
+    },
+    consts.ANALYSIS: {
+        "display_name": "**_Analysis_**",
     },
     consts.MONITOR: {
         "display_name": "**_Monitor_**",

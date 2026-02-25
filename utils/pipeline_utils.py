@@ -20,12 +20,22 @@ def windows_to_linux_path(path):
     """
     Convert path on windows OS to the corresponding cluster path.
     """
+    if path is None:
+        return path
+
+    # Already a linux path on the cluster mount.
+    if isinstance(path, str) and path.startswith("/ems/"):
+        return path
+
     pattern = "Adam-Lab-Shared"
     path_prefix = '/ems/elsc-labs/adam-y/Adam-Lab-Shared/'
-    match = (re.search(pattern, path))
-    path_suffix = path[match.end():].replace('\\','/')
-    fixed_path = path_prefix + path_suffix
-    return fixed_path
+    match = re.search(pattern, path)
+    if match:
+        path_suffix = path[match.end():].replace('\\','/')
+        return path_prefix + path_suffix
+
+    # Fallback: normalize slashes without forcing remap if marker is missing.
+    return str(path).replace("\\", "/")
 
 def get_raw_video_dimensions(raw_path):
     """

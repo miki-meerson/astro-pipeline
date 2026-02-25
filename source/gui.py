@@ -25,10 +25,9 @@ BOOLEAN_INPUT = "boolean_input"
 LIST_INPUT = "list_input"
 MC_PARAMS_TITLE = "**Motion Correction Parameters**"
 PB_PARAMS_TITLE = "**Photobleaching Correction Parameters**"
+PCA_PARAMS_TITLE = "**PCA Parameters**"
 MAX_TRACE_POINTS = 1200
 SPATIAL_DOWNSAMPLE = 8
-TRIMMED_INPUT_KEY = "trimmed_input"
-TRIMMED_SLIDER_KEY = "trimmed_slider"
 
 ########## initialization ###########
 class GUI_parameter:
@@ -102,22 +101,23 @@ def init_session_state():
         st.title('**Voltage Imaging Pipeline** :star:')
 
     defaults = {
-        "raw_video_path": "",
-        "cage": "",
-        "mouse_name": "",
-        "fov": "",
-        "date": "",
-        "behavior": "",
-        "exp_details": "",
+        consts.RAW_VIDEO_PATH: "",
+        consts.ANALYSIS_VIDEO_PATH: "",
+        consts.CAGE: "",
+        consts.MOUSE_NAME: "",
+        consts.FOV: "",
+        consts.EXPERIMENT_DATE: "",
+        consts.BEHAVIOR: "",
+        consts.EXPERIMENT_DETAILS: "",
     }
 
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
-    if TRIMMED_INPUT_KEY not in st.session_state:
-        st.session_state[TRIMMED_INPUT_KEY] = 3000
-    if "pb_trace_loaded" not in st.session_state:
-        st.session_state["pb_trace_loaded"] = False
+    if consts.TRIMMED not in st.session_state:
+        st.session_state[consts.TRIMMED] = 3000
+    if consts.PB_TRACE_LOADED not in st.session_state:
+        st.session_state[consts.PB_TRACE_LOADED] = False
 
     tab_keys = list(pipeline_registry.TABS_REGISTRY.keys())
     tab_display_names = [
@@ -158,7 +158,7 @@ def display_pb_params():
         raw_path = st.session_state.get(consts.RAW_VIDEO_PATH, "")
         st.number_input(
             consts.TRIMMED,
-            key=TRIMMED_INPUT_KEY,
+            key=consts.TRIMMED,
             min_value=0,
             step=1,
             on_change=_sync_slider_from_input
@@ -184,19 +184,19 @@ def display_pb_params():
                 )
 
             max_frame = max(0, n_frames - 1)
-            current_trimmed = int(st.session_state.get(TRIMMED_INPUT_KEY, 3000))
+            current_trimmed = int(st.session_state.get(consts.TRIMMED, 3000))
             current_trimmed = max(0, min(current_trimmed, max_frame))
 
-            if TRIMMED_SLIDER_KEY not in st.session_state:
-                st.session_state[TRIMMED_SLIDER_KEY] = current_trimmed
-            st.session_state[TRIMMED_SLIDER_KEY] = max(0, min(int(st.session_state[TRIMMED_SLIDER_KEY]), max_frame))
+            if consts.TRIMMED_SLIDER not in st.session_state:
+                st.session_state[consts.TRIMMED_SLIDER] = current_trimmed
+            st.session_state[consts.TRIMMED_SLIDER] = max(0, min(int(st.session_state[consts.TRIMMED_SLIDER]), max_frame))
 
             selected_frame = st.slider(
                 "Trim first frames",
                 min_value=0,
                 max_value=max_frame,
                 step=1,
-                key=TRIMMED_SLIDER_KEY,
+                key=consts.TRIMMED_SLIDER,
                 on_change=_sync_input_from_slider
             )
             selected_frame = int(selected_frame)
@@ -231,14 +231,14 @@ def _compute_mean_trace(raw_path, _mtime, _size):
 
 
 def _sync_input_from_slider():
-    if TRIMMED_SLIDER_KEY in st.session_state:
-        st.session_state[TRIMMED_INPUT_KEY] = int(st.session_state[TRIMMED_SLIDER_KEY])
+    if consts.TRIMMED_SLIDER in st.session_state:
+        st.session_state[consts.TRIMMED] = int(st.session_state[consts.TRIMMED_SLIDER])
 
 
 def _sync_slider_from_input():
-    trimmed_value = int(st.session_state.get(TRIMMED_INPUT_KEY, 0))
-    if TRIMMED_SLIDER_KEY in st.session_state:
-        st.session_state[TRIMMED_SLIDER_KEY] = max(0, trimmed_value)
+    trimmed_value = int(st.session_state.get(consts.TRIMMED, 0))
+    if consts.TRIMMED_SLIDER in st.session_state:
+        st.session_state[consts.TRIMMED_SLIDER] = max(0, trimmed_value)
 
 
 def _mean_trace_from_raw(raw_path):
@@ -289,9 +289,9 @@ def choose_file():
             st.session_state["browse_status"] = "No file selected."
             return
 
-        st.session_state["raw_video_path"] = path
+        st.session_state[consts.RAW_VIDEO_PATH] = path
         st.session_state["pb_trace_loaded"] = False
-        st.session_state.pop(TRIMMED_SLIDER_KEY, None)
+        st.session_state.pop(consts.TRIMMED_SLIDER, None)
 
         cage, mouse_name, fov, date, behavior, exp_details = pipe_utils.get_video_details(path)
 
@@ -314,17 +314,43 @@ def choose_file():
                 pass
 
 
-def display_video_input():
+def choose_analysis_file():
+    root = None
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes('-topmost', 1)
+        root.update()
+        path = filedialog.askopenfilename(master=root)
+
+        if not path:
+            st.session_state["analysis_browse_status"] = "No file selected."
+            return
+
+        st.session_state[consts.ANALYSIS_VIDEO_PATH] = path
+        st.session_state["analysis_browse_status"] = f"Selected: {os.path.basename(path)}"
+    except Exception as e:
+        st.session_state["analysis_browse_status"] = f"Browse failed: {e}"
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+
+def display_video_input(text_input="Raw video path", key=consts.RAW_VIDEO_PATH,
+                        browse_callback=choose_file, status_key="browse_status", button_key=None):
     video_input_col_1, video_input_col_2 = st.columns([7,1])
 
     with video_input_col_1:
-        st.text_input('**_Raw video path_**', key="raw_video_path")
+        st.text_input(f'**_{text_input}_**', key=key)
     with video_input_col_2:
         st.write("")
         st.write("")
-        st.button('**_Browse_**', on_click=choose_file)
-    if "browse_status" in st.session_state and st.session_state["browse_status"]:
-        st.caption(st.session_state["browse_status"])
+        st.button('**_Browse_**', on_click=browse_callback, key=button_key)
+    if status_key in st.session_state and st.session_state[status_key]:
+        st.caption(st.session_state[status_key])
 
 
 def display_mouse_details():
@@ -343,17 +369,6 @@ def display_mouse_details():
         exp_details = st.text_input('**_Experiment Details_**', key=consts.EXPERIMENT_DETAILS)
     return
 
-def display_pipeline_steps():
-    steps_col1, steps_col2, steps_col3, steps_col4  = st.columns([1.2,2.5,2, 2])
-    with steps_col1:
-        st.markdown('**_Pipeline steps:_**')
-    with steps_col2:
-        split = GUI_parameter(consts.SPLIT_2CH, BOOLEAN_INPUT, False, display_name="**Split 2 Channels**")
-    with steps_col3:
-        mc = GUI_parameter(consts.MOTION_CORRECTION, BOOLEAN_INPUT, True, display_name="**Motion Correction**")
-    with steps_col4:
-        pb = GUI_parameter(consts.PHOTOBLEACHING_CORRECTION, BOOLEAN_INPUT, True, display_name="**Photobleaching Correction**")
-    return
 
 def display_pipeline_steps():
     cols = st.columns(len(steps_registry.STEPS_REGISTRY) + 1)
@@ -375,7 +390,8 @@ def run_pipeline_logic(session_time):
     with run_col3:
         run_pipeline = st.button('**_run pipeline_**', type="primary")
     if run_pipeline:
-        if not st.session_state.raw_video_path.lower().endswith((".raw", ".tif")):
+        raw_video_path = str(st.session_state.get(consts.RAW_VIDEO_PATH, ""))
+        if not raw_video_path.lower().endswith((".raw", ".tif")):
             st.warning('Enter a valid video path (.raw or .tif)', icon="⚠️")
         else:
             save_pipeline_params(session_time)
@@ -386,7 +402,7 @@ def _get_gui_params_from_session():
 
         for k, v in st.session_state.items():
             gui_params[k] = data_utils.serialize_value(v)
-        gui_params[consts.TRIMMED] = int(st.session_state.get(TRIMMED_INPUT_KEY, 3000))
+        gui_params[consts.TRIMMED] = int(st.session_state.get(consts.TRIMMED, 3000))
 
         return gui_params
 
@@ -507,6 +523,71 @@ def get_experiment_details(row):
 
 
 
+########## 3rd Tab: run analyses ###########
+def display_pca_params():
+    with st.expander(PCA_PARAMS_TITLE):
+        bin_factor = GUI_parameter(consts.SPATIAL_BIN_FACTOR, NUMBER_INPUT, 4)
+    return
+
+
+def _create_analysis_gui_params(video_path):
+    gui_time = datetime.datetime.now().strftime("%d-%m-%Y___%H-%M-%S")
+    home_dir = os.path.split(video_path)[0]
+    video_path_linux = pipe_utils.windows_to_linux_path(video_path)
+    gui_params = {
+        consts.GUI_TIME: gui_time,
+        consts.HOME_DIR: home_dir,
+        consts.HOME_DIR_LINUX: pipe_utils.windows_to_linux_path(home_dir),
+        consts.ANALYSIS_VIDEO_PATH: video_path_linux,
+        consts.RAW_VIDEO_PATH: video_path,
+        consts.RAW_VIDEO_PATH_LINUX: video_path_linux,
+        consts.SPLIT_2CH: False,
+    }
+    return gui_params
+
+
+def _save_analysis_params(session_time):
+    gui_params = _create_analysis_gui_params(st.session_state[consts.ANALYSIS_VIDEO_PATH])
+    gui_params[consts.SPATIAL_BIN_FACTOR] = int(st.session_state.get(consts.SPATIAL_BIN_FACTOR, 4))
+    analysis_dir = os.path.join(paths.PIPELINE_LOGS_DIR, session_time, "analysis_jobs")
+    pipe_utils.mkdir(analysis_dir)
+    param_file_path = os.path.join(analysis_dir, gui_params[consts.GUI_TIME] + consts.PARAMS_FILE_SUFFIX_NAME)
+    with open(param_file_path, 'w') as fp:
+        json.dump(gui_params, fp, indent=4)
+    return param_file_path
+
+
+def _submit_analysis_job(script_path, params_path):
+    from source.step_manager import ClusterJob
+    job = ClusterJob(script_path, pipe_utils.windows_to_linux_path(params_path))
+    job.run_job()
+    return job.job_id
+
+
+def display_analysis_buttons(session_time):
+    cols = st.columns(len(steps_registry.ANALYSIS_STEPS_REGISTRY) + 1)
+
+    with cols[0]:
+        st.markdown('**_Analysis steps:_**')
+
+    for i, (_step_name, step_properties) in enumerate(steps_registry.ANALYSIS_STEPS_REGISTRY.items(), start=1):
+        with cols[i]:
+            if st.button(step_properties["display_name"], key=f"run_analysis_{i}"):
+                video_path = st.session_state.get(consts.ANALYSIS_VIDEO_PATH, "")
+                if not video_path.lower().endswith((".raw", ".tif", ".tiff")):
+                    st.warning('Enter a valid video path (.raw or .tif/.tiff)', icon="⚠️")
+                    continue
+                if not os.path.exists(video_path):
+                    st.warning("Selected video path does not exist.", icon="⚠️")
+                    continue
+                try:
+                    params_path = _save_analysis_params(session_time)
+                    job_id = _submit_analysis_job(step_properties["script"], params_path)
+                    st.success(f"Submitted {step_properties['display_name']} (job {job_id})")
+                except Exception as e:
+                    st.error(f"Failed to submit {step_properties['display_name']}: {e}")
+
+
 ########### Tabs wrapers #############
 def display_run_pipeline_tab(run_pipeline_tab, session_time):
     with run_pipeline_tab:
@@ -519,11 +600,23 @@ def display_run_pipeline_tab(run_pipeline_tab, session_time):
             display_pipeline_steps()
             run_pipeline_logic(session_time)
 
+
 def display_monitor_tab(monitor_tab, session_time):
     with monitor_tab:
         display_pipelines_monitor(session_time)
 
 
+def display_analysis_tab(analysis_tab, session_time):
+    with analysis_tab:
+        display_pca_params()
+        display_video_input(
+            text_input="Processed video path",
+            key=consts.ANALYSIS_VIDEO_PATH,
+            browse_callback=choose_analysis_file,
+            status_key="analysis_browse_status",
+            button_key="analysis_browse_button"
+        )
+        display_analysis_buttons(session_time)
 def main():
     st.set_page_config(layout="wide")
     st_autorefresh(interval=5000, key="global_refresh")
@@ -531,7 +624,9 @@ def main():
     tabs = init_session_state()
     display_run_pipeline_tab(tabs[consts.RUN], session_time)
     display_monitor_tab(tabs[consts.MONITOR], session_time)
+    display_analysis_tab(tabs[consts.ANALYSIS], session_time)
 
 if __name__ == "__main__":
     main()
+    
 

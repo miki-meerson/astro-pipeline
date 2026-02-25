@@ -28,10 +28,14 @@ class PipelinesManager:
     def fetch_new_pipelines(self):
         session_logs_dir = os.path.join(paths.PIPELINE_LOGS_DIR, self.gui_session_time)
         for name in os.listdir(session_logs_dir):
-            if os.path.isdir(os.path.join(session_logs_dir, name)):
+            dir_path = os.path.join(session_logs_dir, name)
+            if os.path.isdir(dir_path):
                 if name not in self.param_files:
+                    param_file = os.path.join(dir_path, consts.PARAMS_FILE_SUFFIX_NAME[1:])
+                    # Ignore non-pipeline folders (e.g., analysis jobs directory).
+                    if not os.path.exists(param_file):
+                        continue
                     self.param_files.append(name)
-                    param_file = os.path.join(session_logs_dir, name, consts.PARAMS_FILE_SUFFIX_NAME[1:])
                     with open(param_file) as json_file:
                         gui_params = json.load(json_file)
                         self.create_new_pipeline(gui_params)

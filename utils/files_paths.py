@@ -16,6 +16,7 @@ MOTION_CORRECTION_BASH = 'run_motion_correction.sh'
 PHOTOBLEACHING_BASH = 'run_photobleaching_correction.sh'
 SPLIT_2CH_BASH = 'run_split_2ch.sh'
 SUITE2P_BASH = 'run_suite2p.sh'
+PCA_BASH = 'run_pca_computation.sh'
 
 ### pipeline dirs and scripts ###
 PIPELINE_LOGS_DIR = os.path.join(pipeline_dir, "metadata", "logs")

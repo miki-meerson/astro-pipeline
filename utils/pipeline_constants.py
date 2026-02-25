@@ -4,8 +4,13 @@ PHOTOBLEACHING_CORRECTION = 'photobleaching_correction'
 SPLIT_2CH = 'split_2ch'
 SUITE2P_EXTRACTION = 'suite2p_extraction'
 
+
+### analysis steps names ###
+PCA_COMPUTATION = 'pca_computation'
+
 ### tab names ###
 RUN = "run"
+ANALYSIS = "analysis"
 MONITOR = "monitor"
 
 
@@ -14,6 +19,7 @@ RAW_VIDEO_PATH = "raw_video_path"
 RAW_VIDEO_PATH_LINUX = "raw_video_path_linux"
 HOME_DIR_LINUX = "home_dir_linux"
 HOME_DIR = "home_dir"
+ANALYSIS_VIDEO_PATH = "analysis_video_path"
 
 ### pipeline states ###
 WAITING = 0
@@ -61,6 +67,9 @@ PB_VIDEO_PATH = "photobleaching_corrected.tif"
 PB_FIT_PATH = "pb_corrected_fit_params.npz"
 S2P_DIR = "for_suite2p"
 QC_DIR = "qc"
+PCA_DIR = "pca"
+PCA_COMPONENTS_PATH = "pca_components.npz"
+PCA_PARAMS_PATH = "pca_params.npz"
 TRACES_DIR = "traces"
 TRACES_PATH = "_traces.csv"
 VIRMEN_PREFIX = "imaging_"
@@ -107,12 +116,18 @@ ORIGINAL_MEAN_INTENSITY = "original_mean_intensity"
 
 
 ### photobleaching metrics - I(t)=A⋅e^(−t/τ)+C, corrected_mean(t)=mt+b ###
+PB_TRACE_LOADED = "pb_trace_loaded"
+TRIMMED_SLIDER = "trimmed_slider"
 TRIMMED = "trimmed"
 BLEACH_TAU = "bleach_tau"
 BLEACH_C = "bleach_C"
 BLEACH_R2 = "bleach_r2"
 RESIDUAL_SLOPE_POST_CORRECTION = "residual_slope_post_correction"  # |m|
 CORRECTED_MEAN_INTENSITY = "corrected_mean_intensity"
+
+
+### PCA ###
+SPATIAL_BIN_FACTOR = "spatial_bin_factor"
 
 ### global signal metrics (on corrected movie) ###
 GLOBAL_DFF_STD = "global_dff_std"
