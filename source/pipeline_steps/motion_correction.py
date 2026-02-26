@@ -29,7 +29,7 @@ def extract_params(gui_param_path):
     gui_time = gui_params[consts.GUI_TIME]
     fr = pipe_utils.get_frame_rate(video_path)
     mc_dict = extract_mc_params(gui_params, fr)
-    split_2ch_flag = gui_params.get(consts.SPLIT_2CH, False)
+    split_2ch_flag = gui_params.get(consts.IS_2CH, False)
     return video_path, gui_time, mc_dict, split_2ch_flag
 
 

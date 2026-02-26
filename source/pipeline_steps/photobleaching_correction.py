@@ -25,7 +25,9 @@ def extract_params(gui_param_path):
     gui_time = gui_params[consts.GUI_TIME]
     trimmed = gui_params.get(consts.TRIMMED, 3000)
     mc_dir = os.path.join(pipeline_dir, consts.MC_DIR)
-    split_2ch_flag = gui_params.get(consts.SPLIT_2CH, False)
+    split_2ch_flag = gui_params.get(consts.IS_2CH, False)
+    if split_2ch_flag:
+        trimmed = 0
 
     if split_2ch_flag:
         channels = ["neuron", "astro"]

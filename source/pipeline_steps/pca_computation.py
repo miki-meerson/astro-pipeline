@@ -39,7 +39,7 @@ def extract_params(gui_param_path):
     pipeline_dir = pipe_utils.get_pipeline_results_dir(raw_video_path)
     gui_time = gui_params[consts.GUI_TIME]
     pb_dir = os.path.join(pipeline_dir, consts.PB_DIR)
-    split_2ch_flag = gui_params.get(consts.SPLIT_2CH, False)
+    split_2ch_flag = gui_params.get(consts.IS_2CH, False)
 
     if split_2ch_flag:
         channels = ["neuron", "astro"]

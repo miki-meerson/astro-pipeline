@@ -29,6 +29,7 @@ PB_PARAMS_TITLE = "**Photobleaching Correction Parameters**"
 PCA_PARAMS_TITLE = "**PCA Parameters**"
 MAX_TRACE_POINTS = 1200
 SPATIAL_DOWNSAMPLE = 8
+IS_2CH_USER_KEY = "_is_2ch_user_selected"
 
 ########## initialization ###########
 class GUI_parameter:
@@ -105,6 +106,8 @@ def init_session_state():
         consts.RAW_VIDEO_PATH: "",
         consts.ANALYSIS_VIDEO_PATH: "",
         consts.HOME_DIR: "",
+        consts.IS_2CH: False,
+        IS_2CH_USER_KEY: False,
         consts.CAGE: "",
         consts.MOUSE_NAME: "",
         consts.FOV: "",
@@ -120,6 +123,9 @@ def init_session_state():
         st.session_state[consts.TRIMMED] = 3000
     if consts.PB_TRACE_LOADED not in st.session_state:
         st.session_state[consts.PB_TRACE_LOADED] = False
+    if "_pipeline_defaults_initialized" not in st.session_state:
+        _refresh_2ch_mode_and_step_defaults(force=True)
+        st.session_state["_pipeline_defaults_initialized"] = True
 
     tab_keys = list(pipeline_registry.TABS_REGISTRY.keys())
     tab_display_names = [
@@ -134,6 +140,50 @@ def init_session_state():
     return tabs_dict
 
 ########## 1st Tab: run pipelines ###########
+def _path_indicates_2ch(raw_path):
+    return "hyp" in str(raw_path).lower()
+
+
+def _apply_pipeline_step_defaults(is_2ch_mode):
+    for step_name in steps_registry.STEPS_REGISTRY.keys():
+        if is_2ch_mode:
+            st.session_state[step_name] = True
+        else:
+            st.session_state[step_name] = step_name in (
+                consts.MOTION_CORRECTION,
+                consts.PHOTOBLEACHING_CORRECTION
+            )
+
+
+def _refresh_2ch_mode_and_step_defaults(force=False):
+    user_2ch = bool(st.session_state.get(IS_2CH_USER_KEY, False))
+    effective_2ch = user_2ch
+    prev_effective_2ch = st.session_state.get("_effective_2ch_mode", None)
+
+    st.session_state[consts.IS_2CH] = effective_2ch
+    st.session_state["_effective_2ch_mode"] = effective_2ch
+    if effective_2ch:
+        st.session_state[consts.TRIMMED] = 0
+        if consts.TRIMMED_SLIDER in st.session_state:
+            st.session_state[consts.TRIMMED_SLIDER] = 0
+
+    if force or prev_effective_2ch is None or effective_2ch != prev_effective_2ch:
+        _apply_pipeline_step_defaults(effective_2ch)
+
+
+def _on_raw_video_path_change():
+    st.session_state[consts.PB_TRACE_LOADED] = False
+    st.session_state.pop(consts.TRIMMED_SLIDER, None)
+    raw_path = st.session_state.get(consts.RAW_VIDEO_PATH, "")
+    if _path_indicates_2ch(raw_path):
+        st.session_state[IS_2CH_USER_KEY] = True
+    _refresh_2ch_mode_and_step_defaults(force=False)
+
+
+def _on_2ch_checkbox_change():
+    _refresh_2ch_mode_and_step_defaults(force=False)
+
+
 def display_mc_params():
     with st.expander(MC_PARAMS_TITLE):
         param_col1, param_col2, param_col3 = st.columns(3)
@@ -294,6 +344,9 @@ def choose_file():
         st.session_state[consts.RAW_VIDEO_PATH] = path
         st.session_state["pb_trace_loaded"] = False
         st.session_state.pop(consts.TRIMMED_SLIDER, None)
+        if _path_indicates_2ch(path):
+            st.session_state[IS_2CH_USER_KEY] = True
+        _refresh_2ch_mode_and_step_defaults(force=False)
 
         cage, mouse_name, fov, date, behavior, exp_details = pipe_utils.get_video_details(path)
 
@@ -368,12 +421,17 @@ def choose_analysis_home_dir():
                 pass
 
 
-def display_video_input(text_input="Raw video path", key=consts.RAW_VIDEO_PATH,
-                        browse_callback=choose_file, status_key="browse_status", button_key=None):
+def display_video_input(text_input="Raw video path",
+                        key=consts.RAW_VIDEO_PATH,
+                        browse_callback=choose_file,
+                        status_key="browse_status",
+                        button_key=None,
+                        on_change=None
+                        ):
     video_input_col_1, video_input_col_2 = st.columns([7,1])
 
     with video_input_col_1:
-        st.text_input(f'**_{text_input}_**', key=key)
+        st.text_input(f'**_{text_input}_**', key=key, on_change=on_change)
     with video_input_col_2:
         st.write("")
         st.write("")
@@ -397,6 +455,15 @@ def display_mouse_details():
     with mouse_details_col_6:
         exp_details = st.text_input('**_Experiment Details_**', key=consts.EXPERIMENT_DETAILS)
     return
+
+
+def display_2ch_flag():
+    st.checkbox(
+        "**2-channel mode**",
+        key=IS_2CH_USER_KEY,
+        on_change=_on_2ch_checkbox_change,
+        help='Enable 2-channel processing. If path contains "Hyp", this is auto-set to True initially.'
+    )
 
 
 def display_pipeline_steps():
@@ -661,7 +728,8 @@ def display_run_pipeline_tab(run_pipeline_tab, session_time):
         cols = st.columns([1,2,1])
         with cols[1]:
             display_mc_params()
-            display_video_input()
+            display_video_input(on_change=_on_raw_video_path_change)
+            display_2ch_flag()
             display_pb_params()
             display_mouse_details()
             display_pipeline_steps()

@@ -20,6 +20,7 @@ RAW_VIDEO_PATH_LINUX = "raw_video_path_linux"
 HOME_DIR_LINUX = "home_dir_linux"
 HOME_DIR = "home_dir"
 ANALYSIS_VIDEO_PATH = "analysis_video_path"
+IS_2CH = "is_2ch"
 
 ### pipeline states ###
 WAITING = 0
