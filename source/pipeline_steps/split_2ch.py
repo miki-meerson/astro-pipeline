@@ -32,15 +32,18 @@ def run_split_2ch(input_path):
     return astro_movie, neuron_movie
 
 
-def save_split_movies(pipeline_dir, astro_movie, neuron_movie):
+def save_split_movies(pipeline_dir, astro_movie, neuron_movie, raw_video_path):
     split_dir = os.path.join(pipeline_dir, consts.SPLIT_DIR)
     pipe_utils.mkdir(split_dir)
+    target_dtype = pipe_utils.get_signed_movie_dtype(raw_video_path)
 
     astro_path = os.path.join(split_dir, consts.SPLIT_ASTRO_VIDEO_PATH)
-    tifffile.imwrite(astro_path, astro_movie.astype('float16'), bigtiff=True)
+    astro_to_save = pipe_utils.cast_movie_for_tiff_save(astro_movie, target_dtype)
+    tifffile.imwrite(astro_path, astro_to_save, bigtiff=True)
 
     split_neuron_path = os.path.join(split_dir, consts.SPLIT_NEURON_VIDEO_PATH)
-    tifffile.imwrite(split_neuron_path, neuron_movie.astype('float16'), bigtiff=True)
+    neuron_to_save = pipe_utils.cast_movie_for_tiff_save(neuron_movie, target_dtype)
+    tifffile.imwrite(split_neuron_path, neuron_to_save, bigtiff=True)
 
 
 def main(args):
@@ -51,7 +54,7 @@ def main(args):
     pipeline_dir = pipe_utils.get_pipeline_results_dir(raw_video_path)
 
     astro_movie, neuron_movie = run_split_2ch(raw_video_path)
-    save_split_movies(pipeline_dir, astro_movie, neuron_movie)
+    save_split_movies(pipeline_dir, astro_movie, neuron_movie, raw_video_path)
 
     print(consts.STEP_COMPLETED)
     return

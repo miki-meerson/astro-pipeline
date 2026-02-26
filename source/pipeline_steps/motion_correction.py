@@ -71,27 +71,48 @@ def run_motion_correction(video_path, mc_params):
         c, dview, n_processes = cm.cluster.setup_cluster(backend='local', n_processes=None, single_thread=False)
         return dview
 
-    opts = set_mc_parameters(video_path, mc_params)
+    def resolve_mmap_path(mmap_file):
+        if isinstance(mmap_file, (list, tuple)):
+            candidates = [str(p) for p in mmap_file if p]
+        else:
+            candidates = [str(mmap_file)] if mmap_file else []
+
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
+
+        raise FileNotFoundError(f"Motion correction memmap file not found. Candidates: {candidates}")
+
+    opts = set_mc_parameters(video_path, dict(mc_params))
     dview = cluster_setup()
 
     try:
-        mc = MotionCorrect(video_path, dview=dview, **opts.get_group('motion'))
-        mc.motion_correct(save_movie=True)
-    except Exception as e:
-        print(str(e))
-        print("motion correction failed - trying to run another one with reduce shifts")
-        mc_params[consts.MAX_SHIFTS] = (10, 10)
-        opts = volparams(params_dict=mc_params)
-        mc = MotionCorrect(video_path, dview=dview, **opts.get_group('motion'))
-        mc.motion_correct(save_movie=True)
+        try:
+            mc = MotionCorrect(video_path, dview=dview, **opts.get_group('motion'))
+            mc.motion_correct(save_movie=True)
+        except Exception as e:
+            print(str(e))
+            print("motion correction failed - trying to run another one with reduce shifts")
+            retry_params = dict(mc_params)
+            retry_params[consts.MAX_SHIFTS] = (10, 10)
+            retry_params["fnames"] = video_path
+            retry_params["border_nan"] = "copy"
+            opts = volparams(params_dict=retry_params)
+            mc = MotionCorrect(video_path, dview=dview, **opts.get_group('motion'))
+            mc.motion_correct(save_movie=True)
 
-    mmap_path = mc.mmap_file[0] if isinstance(mc.mmap_file, (list, tuple)) else mc.mmap_file
-    movie = cm.load(mmap_path)
-    movie = movie.astype(np.float32).copy()
+        mmap_path = resolve_mmap_path(mc.mmap_file)
+        movie_mmap = cm.load(mmap_path)
+        movie = np.asarray(movie_mmap, dtype=np.float32).copy()
+        del movie_mmap
 
-    mean_img = mean_image(mc.mmap_file[0], window=1000, dview=dview)
-
-    return movie, mc.shifts_rig, mean_img
+        mean_img = mean_image(mmap_path, window=1000, dview=dview)
+        return movie, mc.shifts_rig, mean_img
+    finally:
+        try:
+            cm.stop_server(dview=dview)
+        except Exception:
+            pass
 
 
 def apply_reg_shifts_to_movie(movie_path, shifts_mat):
@@ -136,7 +157,7 @@ def run_2ch_motion_correction(astro_path, neuron_path, mc_params):
 
 
 ##### saving functions #####
-def save_corrected_movie(movie, pipeline_dir, mean_image, channel_name=None):
+def save_corrected_movie(movie, pipeline_dir, mean_image, target_dtype, channel_name=None):
     mc_dir = os.path.join(pipeline_dir, consts.MC_DIR)
     pipe_utils.mkdir(mc_dir)
 
@@ -144,7 +165,8 @@ def save_corrected_movie(movie, pipeline_dir, mean_image, channel_name=None):
         path = os.path.join(mc_dir, consts.MC_VIDEO_PATH)
     else:
         path = os.path.join(mc_dir, f"{channel_name}_{consts.MC_VIDEO_PATH}")
-    tifffile.imwrite(path, movie.astype(np.float32), bigtiff=True)
+    movie_to_save = pipe_utils.cast_movie_for_tiff_save(movie, target_dtype)
+    tifffile.imwrite(path, movie_to_save, bigtiff=True)
 
     mean_img = np.array(mean_image.tolist())
     if channel_name is None:
@@ -195,6 +217,7 @@ def main(args):
     print("Motion Correcrion on:", video_path)
     pipeline_dir = pipe_utils.get_pipeline_results_dir(video_path)
     video_path_tif = pipe_utils.raw_to_tif(video_path) if video_path.endswith(".raw") else video_path
+    target_dtype = pipe_utils.get_signed_movie_dtype(video_path)
 
     # 2ch movies are 2P movies post splitting (astro and neuron channels)
     # note - not saving traces in 2P movies because there is no SLM
@@ -206,17 +229,15 @@ def main(args):
         mc_neuron, mc_astro, shifts_neuron, mean_image_neuron, mean_image_astro = \
             run_2ch_motion_correction(split_astro_path, split_neuron_path, mc_params)
 
-        save_corrected_movie(mc_neuron, pipeline_dir, mean_image_neuron, channel_name="neuron")
-        save_corrected_movie(mc_astro, pipeline_dir, mean_image_astro, channel_name="astro")
+        save_corrected_movie(mc_neuron, pipeline_dir, mean_image_neuron, target_dtype, channel_name="neuron")
+        save_corrected_movie(mc_astro, pipeline_dir, mean_image_astro, target_dtype, channel_name="astro")
         save_mc_shifts(pipeline_dir, shifts_neuron)
         save_motion_qc_metrics(pipeline_dir, shifts_neuron)
     else:
-        # TODO change this flow such that saving the results will be less messy and happen the same way for one or two channels
         mc_movie, shifts_mat, mean_image = run_motion_correction(video_path_tif, mc_params)
-        save_corrected_movie(mc_movie, pipeline_dir, mean_image)
+        save_corrected_movie(mc_movie, pipeline_dir, mean_image, target_dtype)
         save_mc_shifts(pipeline_dir, shifts_mat)
         save_motion_qc_metrics(pipeline_dir, shifts_mat)
-
         rois = pipe_utils.get_rois_mask(video_path)
         traces = pipe_utils.trace_extraction(mc_movie, rois)
         save_mc_traces(traces, pipeline_dir)

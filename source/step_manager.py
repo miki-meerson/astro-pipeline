@@ -424,7 +424,7 @@ def main(args):
         manager.manage_pipelines_steps()
         manager.pipeline_termination()
         manager.save_pipelines_logs()
-        time.sleep(10)  # check for updates every 10 seconds
+        time.sleep(5)  # how often to check for updates (seconds)
 
 
 if __name__ == "__main__":

@@ -71,9 +71,73 @@ def get_pipeline_results_dir(raw_path):
     return the path (and also create it if not exist) of the directory
     that will contain many outputs of the pipeline
     """
-    pipeline_dir = os.path.join(os.path.split(raw_path)[0], consts.PIPELINE_DIR)
-    mkdir(pipeline_dir)
+    home_dir = os.path.split(raw_path)[0]
+    return get_pipeline_results_dir_from_home(home_dir, create_dir=True)
+
+
+def get_pipeline_results_dir_from_home(home_dir, create_dir=False):
+    pipeline_dir = os.path.join(home_dir, consts.PIPELINE_DIR)
+    if create_dir:
+        mkdir(pipeline_dir)
     return pipeline_dir
+
+
+def get_raw_movie_dtype(raw_path):
+    """
+    Return the dtype of the original input movie.
+    """
+    ext = os.path.splitext(raw_path)[1].lower()
+    if ext == ".raw":
+        return np.dtype(np.uint16)
+    if ext in (".tif", ".tiff"):
+        with tifffile.TiffFile(raw_path) as tif:
+            return np.dtype(tif.series[0].dtype)
+    raise ValueError(f"Unsupported movie format for dtype extraction: {raw_path}")
+
+
+def get_signed_movie_dtype(raw_path):
+    """
+    Return a signed dtype compatible with the original movie dtype.
+    Unsigned integer dtypes are promoted to the next wider signed dtype
+    so negative values can be represented.
+    """
+    dtype = get_raw_movie_dtype(raw_path)
+
+    if np.issubdtype(dtype, np.floating):
+        return dtype
+    if np.issubdtype(dtype, np.signedinteger):
+        return dtype
+    if dtype == np.dtype(np.uint8):
+        return np.dtype(np.int16)
+    if dtype == np.dtype(np.uint16):
+        return np.dtype(np.int32)
+    if dtype == np.dtype(np.uint32):
+        return np.dtype(np.int64)
+    if dtype == np.dtype(np.uint64):
+        return np.dtype(np.float64)
+
+    return np.dtype(np.float32)
+
+
+def cast_movie_for_tiff_save(movie, target_dtype):
+    """
+    Safely cast movie data to target dtype before TIFF save.
+    """
+    arr = np.asarray(movie)
+    target_dtype = np.dtype(target_dtype)
+
+    if np.issubdtype(target_dtype, np.integer):
+        info = np.iinfo(target_dtype)
+        return np.clip(np.rint(arr), info.min, info.max).astype(target_dtype)
+
+    return arr.astype(target_dtype)
+
+
+def get_pb_video_path_from_home(home_dir, channel_name=None):
+    pipeline_dir = get_pipeline_results_dir_from_home(home_dir, create_dir=False)
+    pb_dir = os.path.join(pipeline_dir, consts.PB_DIR)
+    pb_file = consts.PB_VIDEO_PATH if channel_name is None else f"{channel_name}_{consts.PB_VIDEO_PATH}"
+    return os.path.join(pb_dir, pb_file)
 
 def get_last_modified_file(dirname, suffix):
     list_of_files = glob.glob(dirname + '/*' + suffix) # * means all if need specific format then *.csv
@@ -104,18 +168,30 @@ def get_denoised_path(fnames, gui_time):
     latest_file = max(list_of_files, key=os.path.getctime)
     return latest_file
 
-def raw_to_tif(raw_path, start_frame=None, end_frame=None):
+def raw_to_tif(raw_path, start_frame=None, end_frame=None, output_path=None):
     """
-    convert the raw formatted vodeo file to a tif file and save it in pipeline results dir.
+    convert the raw formatted vodeo file to a tif file.
     find width and height in the experiment.xml file.
     if start and end frame supplied - save sliced video based on those values.
+    if output_path is supplied - save there, else save in pipeline results dir.
     """
-    pipeline_dir = get_pipeline_results_dir(raw_path)
     width, height = get_raw_video_dimensions(raw_path)
     rawmovie_1d = np.fromfile(raw_path, dtype=np.uint16)
     movie_3d = np.reshape(rawmovie_1d,(-1,height,width))
 
-    tif_video_path = os.path.join(pipeline_dir, consts.RAW_VIDEO_TIF)
+    if start_frame is not None or end_frame is not None:
+        start = 0 if start_frame is None else int(start_frame)
+        stop = movie_3d.shape[0] if end_frame is None else int(end_frame)
+        movie_3d = movie_3d[start:stop]
+
+    target_dtype = get_signed_movie_dtype(raw_path)
+    movie_3d = cast_movie_for_tiff_save(movie_3d, target_dtype)
+
+    if output_path is None:
+        pipeline_dir = get_pipeline_results_dir(raw_path)
+        tif_video_path = os.path.join(pipeline_dir, consts.RAW_VIDEO_TIF)
+    else:
+        tif_video_path = output_path
     tifffile.imwrite(tif_video_path, movie_3d, bigtiff=True)
     return tif_video_path
 

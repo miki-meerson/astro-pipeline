@@ -132,7 +132,7 @@ def run_photobleaching_correction(fr, start_frame, stop_frame, mc_path):
 
 
 
-def save_pb_correct_data(pipeline_dir, movie_clean, pb_correct_dict, channel_name=None):
+def save_pb_correct_data(pipeline_dir, movie_clean, pb_correct_dict, raw_video_path, channel_name=None):
     pb_dir = os.path.join(pipeline_dir, consts.PB_DIR)
     pipe_utils.mkdir(pb_dir)
 
@@ -143,7 +143,9 @@ def save_pb_correct_data(pipeline_dir, movie_clean, pb_correct_dict, channel_nam
         pb_movie_path = os.path.join(pb_dir, f"{channel_name}_{consts.PB_VIDEO_PATH}")
         pb_fit_path = os.path.join(pb_dir, f"{channel_name}_{consts.PB_FIT_PATH}")
 
-    tifffile.imwrite(pb_movie_path, movie_clean.astype('float16'), bigtiff=True)
+    target_dtype = pipe_utils.get_signed_movie_dtype(raw_video_path)
+    movie_to_save = pipe_utils.cast_movie_for_tiff_save(movie_clean, target_dtype)
+    tifffile.imwrite(pb_movie_path, movie_to_save, bigtiff=True)
 
     np.savez(
         pb_fit_path,
@@ -206,6 +208,7 @@ def main(args):
             pipeline_dir,
             movie_clean,
             pb_correct_dict,
+            raw_video_path,
             channel_name=None if ch == "full" else ch
         )
         save_pb_qc(

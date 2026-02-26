@@ -17,6 +17,10 @@ def extract_params(gui_param_path):
         gui_params = json.load(fp)
 
     analysis_video_path = gui_params.get(consts.ANALYSIS_VIDEO_PATH, "")
+    home_dir = gui_params.get(consts.HOME_DIR_LINUX, gui_params.get(consts.HOME_DIR, ""))
+    if not analysis_video_path and home_dir:
+        analysis_video_path = pipe_utils.get_pb_video_path_from_home(home_dir)
+
     raw_video_path = gui_params.get(consts.RAW_VIDEO_PATH_LINUX, analysis_video_path)
     spatial_bin_factor = gui_params[consts.SPATIAL_BIN_FACTOR]
 
