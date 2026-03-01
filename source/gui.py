@@ -19,7 +19,7 @@ from utils import pipeline_utils as pipe_utils
 from utils import data_utils as data_utils
 from utils import DB_utils
 from utils import pipeline_registry as steps_registry
-from source import step_manager
+from source import analysis_job_manager
 
 NUMBER_INPUT = "number_input"
 BOOLEAN_INPUT = "boolean_input"
@@ -383,33 +383,7 @@ def choose_analysis_file():
             return
 
         st.session_state[consts.ANALYSIS_VIDEO_PATH] = path
-        st.session_state["analysis_browse_status"] = f"Selected: {os.path.basename(path)}"
-    except Exception as e:
-        st.session_state["analysis_browse_status"] = f"Browse failed: {e}"
-    finally:
-        if root is not None:
-            try:
-                root.destroy()
-            except Exception:
-                pass
-
-
-def choose_analysis_home_dir():
-    root = None
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        root.wm_attributes('-topmost', 1)
-        root.update()
-        path = filedialog.askdirectory(master=root)
-
-        if not path:
-            st.session_state["analysis_browse_status"] = "No folder selected."
-            return
-
-        st.session_state[consts.HOME_DIR] = path
-        
-        st.session_state[consts.ANALYSIS_VIDEO_PATH] = pipe_utils.get_pb_video_path_from_home(ps)
+        st.session_state[consts.HOME_DIR] = os.path.dirname(path)
         st.session_state["analysis_browse_status"] = f"Selected: {os.path.basename(path)}"
     except Exception as e:
         st.session_state["analysis_browse_status"] = f"Browse failed: {e}"
@@ -619,109 +593,6 @@ def get_experiment_details(row):
 
 
 ########## 3rd Tab: run analyses ###########
-def display_pca_params():
-    with st.expander(PCA_PARAMS_TITLE):
-        bin_factor = GUI_parameter(consts.SPATIAL_BIN_FACTOR, NUMBER_INPUT, 4)
-    return
-
-
-def save_analysis_params(session_time):
-    gui_params = _get_gui_params_from_session()
-    gui_params[consts.GUI_TIME] = datetime.datetime.now().strftime("%d-%m-%Y___%H-%M-%S")
-
-    home_dir = st.session_state.get(consts.HOME_DIR, "")
-    
-    if not home_dir or not os.path.isdir(home_dir):
-        raise ValueError("Select a valid home directory.")
-
-    analysis_video_path = pipe_utils.get_pb_video_path_from_home(home_dir)
-    if not os.path.isfile(analysis_video_path):
-        raise FileNotFoundError(f"Processed video not found: {analysis_video_path}")
-
-    gui_params[consts.HOME_DIR] = home_dir
-    gui_params[consts.HOME_DIR_LINUX] = pipe_utils.windows_to_linux_path(home_dir)
-    gui_params[consts.ANALYSIS_VIDEO_PATH] = pipe_utils.windows_to_linux_path(analysis_video_path)
-
-    raw_video_path = st.session_state.get(consts.RAW_VIDEO_PATH, "")
-    if raw_video_path:
-        gui_params[consts.RAW_VIDEO_PATH] = raw_video_path
-        gui_params[consts.RAW_VIDEO_PATH_LINUX] = pipe_utils.windows_to_linux_path(raw_video_path)
-    else:
-        # PCA extraction can operate with analysis_video_path fallback.
-        gui_params[consts.RAW_VIDEO_PATH] = analysis_video_path
-        gui_params[consts.RAW_VIDEO_PATH_LINUX] = gui_params[consts.ANALYSIS_VIDEO_PATH]
-
-    gui_params[consts.SPATIAL_BIN_FACTOR] = int(st.session_state.get(consts.SPATIAL_BIN_FACTOR, 4))
-
-    analysis_dir = os.path.join(paths.PIPELINE_LOGS_DIR, session_time, "analysis_jobs")
-    pipe_utils.mkdir(analysis_dir)
-
-    param_file_path = os.path.join(analysis_dir, gui_params[consts.GUI_TIME] + consts.PARAMS_FILE_SUFFIX_NAME)
-    with open(param_file_path , 'w') as fp:
-        print("Saved gui_params to {}".format(param_file_path))
-        json.dump(gui_params, fp, indent=4)
-    return param_file_path
-
-
-def submit_analysis_job(script_path, params_path):
-    job = step_manager.ClusterJob(script_path, pipe_utils.windows_to_linux_path(params_path))
-    job.run_job()
-    return job.job_id
-
-
-def display_movie_preview():
-    home_dir = st.session_state.get(consts.HOME_DIR, "")
-    if home_dir:
-        analysis_movie_path = pipe_utils.get_pb_video_path_from_home(home_dir)
-        st.session_state[consts.ANALYSIS_VIDEO_PATH] = analysis_movie_path
-    else:
-        analysis_movie_path = st.session_state.get(consts.ANALYSIS_VIDEO_PATH, "")
-
-    if not analysis_movie_path:
-        st.caption("Select a home directory to preview the processed movie.")
-        return
-
-    if os.path.isdir(analysis_movie_path):
-        st.warning("Expected a processed .tif file path, but got a folder.")
-        return
-
-    if not analysis_movie_path.lower().endswith((".tif", ".tiff")):
-        st.warning("Preview supports .tif/.tiff files only.")
-        return
-
-    try:
-        analysis_movie = tifffile.memmap(analysis_movie_path)
-    except Exception as e:
-        st.warning(f"Could not load video preview: {e}")
-        return
-
-    if getattr(analysis_movie, "ndim", 0) != 3 or analysis_movie.shape[0] == 0:
-        st.warning("Expected a non-empty 3D movie for preview.")
-        return
-
-    st.caption(f"Processed movie: {analysis_movie_path}")
-    n_frames = int(analysis_movie.shape[0])
-    frame_idx = st.slider("Preview frame", 0, n_frames - 1, 0, key="analysis_preview_frame")
-    st.image(analysis_movie[frame_idx], clamp=True, channels="GRAY", width=True)
-
-
-def display_analysis_buttons(session_time):
-    cols = st.columns(len(steps_registry.ANALYSIS_STEPS_REGISTRY) + 1)
-
-    with cols[0]:
-        st.markdown('**_Analysis steps:_**')
-
-    for i, step_properties in enumerate(steps_registry.ANALYSIS_STEPS_REGISTRY.values(), start=1):
-        with cols[i]:
-            if st.button(step_properties["display_name"], key=f"run_analysis_{i}"):
-                try:
-                    params_path = save_analysis_params(session_time)
-                    job_id = submit_analysis_job(step_properties["script"], params_path)
-                    st.success(f"Submitted {step_properties['display_name']} (job {job_id})")
-                except Exception as e:
-                    st.error(f"Failed to submit {step_properties['display_name']}: {e}")
-
-
 ########### Tabs wrapers #############
 def display_run_pipeline_tab(run_pipeline_tab, session_time):
     with run_pipeline_tab:
@@ -743,16 +614,18 @@ def display_monitor_tab(monitor_tab, session_time):
 
 def display_analysis_tab(analysis_tab, session_time):
     with analysis_tab:
-        display_pca_params()
+        analysis_job_manager.display_pca_params(GUI_parameter, NUMBER_INPUT, PCA_PARAMS_TITLE)
         display_video_input(
-            text_input="Home directory path",
-            key=consts.HOME_DIR,
-            browse_callback=choose_analysis_home_dir,
+            text_input="Analysis movie path",
+            key=consts.ANALYSIS_VIDEO_PATH,
+            browse_callback=choose_analysis_file,
             status_key="analysis_browse_status",
-            button_key="analysis_browse_button"
+            button_key="analysis_browse_button",
+            on_change=analysis_job_manager.on_analysis_video_path_change
         )
-        display_movie_preview()
-        display_analysis_buttons(session_time)
+        analysis_job_manager.display_analysis_buttons(session_time, _get_gui_params_from_session)
+        analysis_job_manager.display_analysis_status()
+        analysis_job_manager.display_analysis_results()
 
 
 def main():

@@ -71,6 +71,10 @@ QC_DIR = "qc"
 PCA_DIR = "pca"
 PCA_COMPONENTS_PATH = "pca_components.npz"
 PCA_PARAMS_PATH = "pca_params.npz"
+PCA_OVERVIEW_PATH = "pca_overview.png"
+ICA_COMPONENTS_PATH = "ica_components.npz"
+ICA_PARAMS_PATH = "ica_params.npz"
+ICA_OVERVIEW_PATH = "ica_overview.png"
 TRACES_DIR = "traces"
 TRACES_PATH = "_traces.csv"
 VIRMEN_PREFIX = "imaging_"
@@ -129,6 +133,8 @@ CORRECTED_MEAN_INTENSITY = "corrected_mean_intensity"
 
 ### PCA ###
 SPATIAL_BIN_FACTOR = "spatial_bin_factor"
+PCA_K_KEEP = "pca_k_keep"
+ICA_N_COMPONENTS = "ica_n_components"
 
 ### global signal metrics (on corrected movie) ###
 GLOBAL_DFF_STD = "global_dff_std"

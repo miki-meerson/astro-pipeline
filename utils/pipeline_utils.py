@@ -152,21 +152,6 @@ def get_mc_video(raw_video_path):
     mc_path = get_last_modified_file(mc_dir, consts.MC_VIDEO_PATH)
     return mc_path
 
-def get_denoised_path(fnames, gui_time):
-    home = os.path.split(os.path.split(fnames)[0])[0]
-    denoise_dir = os.path.join(home,'denoiser_files')
-    deepinterpolation_dir = os.path.join(denoise_dir,'deepinterpolation')
-    deepvid_dir = os.path.join(denoise_dir,'deepvid')
-    gui_time_dir = os.path.join(deepinterpolation_dir, gui_time)
-    if not os.path.exists(gui_time_dir):
-        gui_time_dir = os.path.join(deepvid_dir, gui_time)
-    denoised_file = os.path.join(gui_time_dir, "denoised_no_pad.tif")
-    if os.path.isfile(denoised_file): # if merge done right after pipeline finished
-        return denoised_file
-    # else take the last file in denoise_dir
-    list_of_files = glob.glob(denoise_dir + '/**/*.tif', recursive=True)
-    latest_file = max(list_of_files, key=os.path.getctime)
-    return latest_file
 
 def raw_to_tif(raw_path, start_frame=None, end_frame=None, output_path=None):
     """
