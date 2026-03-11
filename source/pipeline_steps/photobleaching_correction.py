@@ -23,11 +23,9 @@ def extract_params(gui_param_path):
 
     pipeline_dir = pipe_utils.get_pipeline_results_dir(raw_video_path)
     gui_time = gui_params[consts.GUI_TIME]
-    trimmed = gui_params.get(consts.TRIMMED, 3000)
+    trimmed = gui_params.get(consts.TRIMMED, 0)
     mc_dir = os.path.join(pipeline_dir, consts.MC_DIR)
     split_2ch_flag = gui_params.get(consts.IS_2CH, False)
-    if split_2ch_flag:
-        trimmed = 0
 
     if split_2ch_flag:
         channels = ["neuron", "astro"]
@@ -56,7 +54,8 @@ def run_photobleaching_correction(fr, start_frame, stop_frame, mc_path):
 
     # Mean trace across all pixels
     p = np.mean(Y, axis=1)
-    t = np.arange(n_frames) / fr
+    frame_idx = np.arange(start_frame, start_frame + n_frames, dtype=np.int64)
+    t = frame_idx / fr
 
     # Fitting range
     q = p[:stop]
@@ -126,6 +125,7 @@ def run_photobleaching_correction(fr, start_frame, stop_frame, mc_path):
 
     pb_correct_dict["original_mean"] = p
     pb_correct_dict["corrected_mean"] = corrected_mean
+    pb_correct_dict["frame_idx"] = frame_idx
     pb_correct_dict["time_sec"] = t
     pb_correct_dict["corrected_mean_fit_line"] = slope * t + intercept
     pb_correct_dict["qc_metrics"] = qc_metrics
@@ -167,18 +167,18 @@ def save_pb_qc(pipeline_dir, pb_correct_dict, channel_name=None):
     with open(qc_json_path, "w") as fp:
         json.dump(pb_correct_dict["qc_metrics"], fp, indent=2)
 
-    t = pb_correct_dict["time_sec"]
+    frame_idx = pb_correct_dict["frame_idx"]
     original_mean = pb_correct_dict["original_mean"]
     corrected_mean = pb_correct_dict["corrected_mean"]
     fitted_curve = pb_correct_dict["fitted_curve"]
     corrected_fit_line = pb_correct_dict["corrected_mean_fit_line"]
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(t, original_mean, label="Original mean intensity", linewidth=1.5)
-    ax.plot(t, fitted_curve, label="Fitted exponential", linewidth=1.5)
-    ax.plot(t, corrected_mean, label="Corrected mean intensity", linewidth=1.5)
-    ax.plot(t, corrected_fit_line, label="Corrected linear fit", linewidth=1.2, linestyle="--")
-    ax.set_xlabel("Time (s)")
+    ax.plot(frame_idx, original_mean, label="Original mean intensity", linewidth=1.5)
+    ax.plot(frame_idx, fitted_curve, label="Fitted exponential", linewidth=1.5)
+    ax.plot(frame_idx, corrected_mean, label="Corrected mean intensity", linewidth=1.5)
+    ax.plot(frame_idx, corrected_fit_line, label="Corrected linear fit", linewidth=1.2, linestyle="--")
+    ax.set_xlabel("Frame")
     ax.set_ylabel("Intensity (a.u.)")
     ax.set_title("Photobleaching QC")
     ax.legend(loc="best")

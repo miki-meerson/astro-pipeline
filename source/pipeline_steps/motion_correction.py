@@ -3,6 +3,10 @@ based on: @caichangjia
 """
 import os
 import warnings
+import tempfile
+import shutil
+import hashlib
+from contextlib import contextmanager
 
 warnings.filterwarnings('ignore')
 from scipy.io import savemat
@@ -60,7 +64,44 @@ def extract_mc_params(gui_params, fr):
 
 ##### Caiman motion correction #####
 
-def run_motion_correction(video_path, mc_params):
+@contextmanager
+def isolated_motion_correction_workspace(base_dir):
+    """
+    Run CaImAn inside a per-job scratch directory so concurrent jobs do not
+    reuse intermediate memmaps or relative output paths.
+    """
+    pipe_utils.mkdir(base_dir)
+    workspace = tempfile.mkdtemp(prefix="caiman_mc_", dir=base_dir)
+    prev_cwd = os.getcwd()
+    try:
+        os.chdir(workspace)
+        yield workspace
+    finally:
+        os.chdir(prev_cwd)
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
+def prepare_unique_motion_input(video_path, workspace_dir):
+    """
+    CaImAn derives memmap/output names from the input filename. The pipeline
+    reuses generic names like raw_video.tif and 2ch_split_neuron.tif across
+    many runs, so concurrent jobs can collide if CaImAn writes to a shared
+    temp location. Give each run a unique local filename first.
+    """
+    abs_video_path = os.path.abspath(video_path)
+    _, ext = os.path.splitext(abs_video_path)
+    path_hash = hashlib.sha1(abs_video_path.encode("utf-8")).hexdigest()[:12]
+    unique_input_path = os.path.join(workspace_dir, f"mc_input_{path_hash}{ext.lower()}")
+
+    try:
+        os.symlink(abs_video_path, unique_input_path)
+    except OSError:
+        shutil.copy2(abs_video_path, unique_input_path)
+
+    return unique_input_path
+
+
+def run_motion_correction(video_path, mc_params, workspace_root):
     def set_mc_parameters(video_path, mc_dict):
         opts_dict = mc_dict
         opts_dict["fnames"] = video_path
@@ -83,36 +124,38 @@ def run_motion_correction(video_path, mc_params):
 
         raise FileNotFoundError(f"Motion correction memmap file not found. Candidates: {candidates}")
 
-    opts = set_mc_parameters(video_path, dict(mc_params))
-    dview = cluster_setup()
+    with isolated_motion_correction_workspace(workspace_root) as workspace_dir:
+        mc_input_path = prepare_unique_motion_input(video_path, workspace_dir)
+        opts = set_mc_parameters(mc_input_path, dict(mc_params))
+        dview = cluster_setup()
 
-    try:
         try:
-            mc = MotionCorrect(video_path, dview=dview, **opts.get_group('motion'))
-            mc.motion_correct(save_movie=True)
-        except Exception as e:
-            print(str(e))
-            print("motion correction failed - trying to run another one with reduce shifts")
-            retry_params = dict(mc_params)
-            retry_params[consts.MAX_SHIFTS] = (10, 10)
-            retry_params["fnames"] = video_path
-            retry_params["border_nan"] = "copy"
-            opts = volparams(params_dict=retry_params)
-            mc = MotionCorrect(video_path, dview=dview, **opts.get_group('motion'))
-            mc.motion_correct(save_movie=True)
+            try:
+                mc = MotionCorrect(mc_input_path, dview=dview, **opts.get_group('motion'))
+                mc.motion_correct(save_movie=True)
+            except Exception as e:
+                print(str(e))
+                print("motion correction failed - trying to run another one with reduce shifts")
+                retry_params = dict(mc_params)
+                retry_params[consts.MAX_SHIFTS] = (10, 10)
+                retry_params["fnames"] = mc_input_path
+                retry_params["border_nan"] = "copy"
+                opts = volparams(params_dict=retry_params)
+                mc = MotionCorrect(mc_input_path, dview=dview, **opts.get_group('motion'))
+                mc.motion_correct(save_movie=True)
 
-        mmap_path = resolve_mmap_path(mc.mmap_file)
-        movie_mmap = cm.load(mmap_path)
-        movie = np.asarray(movie_mmap, dtype=np.float32).copy()
-        del movie_mmap
+            mmap_path = resolve_mmap_path(mc.mmap_file)
+            movie_mmap = cm.load(mmap_path)
+            movie = np.asarray(movie_mmap, dtype=np.float32).copy()
+            del movie_mmap
 
-        mean_img = mean_image(mmap_path, window=1000, dview=dview)
-        return movie, mc.shifts_rig, mean_img
-    finally:
-        try:
-            cm.stop_server(dview=dview)
-        except Exception:
-            pass
+            mean_img = mean_image(mmap_path, window=1000, dview=dview)
+            return movie, mc.shifts_rig, mean_img
+        finally:
+            try:
+                cm.stop_server(dview=dview)
+            except Exception:
+                pass
 
 
 def apply_reg_shifts_to_movie(movie_path, shifts_mat):
@@ -133,7 +176,7 @@ def apply_reg_shifts_to_movie(movie_path, shifts_mat):
     return movie_reg
 
 
-def run_2ch_motion_correction(astro_path, neuron_path, mc_params):
+def run_2ch_motion_correction(astro_path, neuron_path, mc_params, workspace_root):
     """
     apply motion correction to neuron's movie,
     and then apply the same reg shifts to astrocyte movie
@@ -146,7 +189,9 @@ def run_2ch_motion_correction(astro_path, neuron_path, mc_params):
         mc_astro: corrected astrocyte movie
         shifts_neuron: reg shifts mat
     """
-    mc_neuron, shifts_neuron, mean_image_neuron = run_motion_correction(neuron_path, mc_params)
+    mc_neuron, shifts_neuron, mean_image_neuron = run_motion_correction(
+        neuron_path, mc_params, workspace_root
+    )
     print("Motion correction applied to neuron movie")
 
     mc_astro = apply_reg_shifts_to_movie(astro_path, shifts_neuron)
@@ -216,6 +261,7 @@ def main(args):
     print("GUI TIME:", gui_time)
     print("Motion Correcrion on:", video_path)
     pipeline_dir = pipe_utils.get_pipeline_results_dir(video_path)
+    mc_workspace_root = os.path.join(pipeline_dir, consts.MC_DIR, "_caiman_workspace")
     video_path_tif = pipe_utils.raw_to_tif(video_path) if video_path.endswith(".raw") else video_path
     target_dtype = pipe_utils.get_signed_movie_dtype(video_path)
 
@@ -227,14 +273,23 @@ def main(args):
         split_neuron_path = os.path.join(split_dir, consts.SPLIT_NEURON_VIDEO_PATH)
 
         mc_neuron, mc_astro, shifts_neuron, mean_image_neuron, mean_image_astro = \
-            run_2ch_motion_correction(split_astro_path, split_neuron_path, mc_params)
+            run_2ch_motion_correction(
+                split_astro_path,
+                split_neuron_path,
+                mc_params,
+                mc_workspace_root,
+            )
 
         save_corrected_movie(mc_neuron, pipeline_dir, mean_image_neuron, target_dtype, channel_name="neuron")
         save_corrected_movie(mc_astro, pipeline_dir, mean_image_astro, target_dtype, channel_name="astro")
         save_mc_shifts(pipeline_dir, shifts_neuron)
         save_motion_qc_metrics(pipeline_dir, shifts_neuron)
     else:
-        mc_movie, shifts_mat, mean_image = run_motion_correction(video_path_tif, mc_params)
+        mc_movie, shifts_mat, mean_image = run_motion_correction(
+            video_path_tif,
+            mc_params,
+            mc_workspace_root,
+        )
         save_corrected_movie(mc_movie, pipeline_dir, mean_image, target_dtype)
         save_mc_shifts(pipeline_dir, shifts_mat)
         save_motion_qc_metrics(pipeline_dir, shifts_mat)

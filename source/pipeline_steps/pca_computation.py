@@ -19,12 +19,16 @@ def extract_params(gui_param_path):
     with open(gui_param_path, "r") as fp:
         gui_params = json.load(fp)
 
-    analysis_video_path = gui_params.get(consts.ANALYSIS_VIDEO_PATH, "")
+    analysis_video_path = pipe_utils.windows_to_linux_path(
+        gui_params.get(consts.ANALYSIS_VIDEO_PATH, "")
+    )
     home_dir = gui_params.get(consts.HOME_DIR_LINUX, gui_params.get(consts.HOME_DIR, ""))
     if not analysis_video_path and home_dir:
         analysis_video_path = pipe_utils.get_pb_video_path_from_home(home_dir)
 
-    raw_video_path = gui_params.get(consts.RAW_VIDEO_PATH_LINUX, analysis_video_path)
+    raw_video_path = pipe_utils.windows_to_linux_path(
+        gui_params.get(consts.RAW_VIDEO_PATH_LINUX, analysis_video_path)
+    )
     spatial_bin_factor = int(gui_params.get(consts.SPATIAL_BIN_FACTOR, 4))
     k_keep = int(gui_params.get(consts.PCA_K_KEEP, 10))
     n_ics = int(gui_params.get(consts.ICA_N_COMPONENTS, 6))

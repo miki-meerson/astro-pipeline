@@ -120,7 +120,7 @@ def init_session_state():
         if k not in st.session_state:
             st.session_state[k] = v
     if consts.TRIMMED not in st.session_state:
-        st.session_state[consts.TRIMMED] = 3000
+        st.session_state[consts.TRIMMED] = 0
     if consts.PB_TRACE_LOADED not in st.session_state:
         st.session_state[consts.PB_TRACE_LOADED] = False
     if "_pipeline_defaults_initialized" not in st.session_state:
@@ -162,10 +162,6 @@ def _refresh_2ch_mode_and_step_defaults(force=False):
 
     st.session_state[consts.IS_2CH] = effective_2ch
     st.session_state["_effective_2ch_mode"] = effective_2ch
-    if effective_2ch:
-        st.session_state[consts.TRIMMED] = 0
-        if consts.TRIMMED_SLIDER in st.session_state:
-            st.session_state[consts.TRIMMED_SLIDER] = 0
 
     if force or prev_effective_2ch is None or effective_2ch != prev_effective_2ch:
         _apply_pipeline_step_defaults(effective_2ch)

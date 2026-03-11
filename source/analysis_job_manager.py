@@ -3,7 +3,6 @@ import json
 import os
 import subprocess
 import sys
-from types import SimpleNamespace
 
 import numpy as np
 import streamlit as st
@@ -79,36 +78,6 @@ def save_analysis_params(session_time, get_gui_params_fn):
 
 
 def submit_analysis_job(step_name, step_properties, params_path):
-    if step_name == consts.PCA_COMPUTATION:
-        local_script_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "pipeline_steps",
-            "pca_computation.py",
-        )
-        if not os.path.isfile(local_script_path):
-            raise FileNotFoundError(f"Analysis script not found: {local_script_path}")
-
-        log_file = os.path.join(
-            os.path.dirname(params_path),
-            f"{step_name}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
-        )
-        log_handle = open(log_file, "w", encoding="utf-8")
-
-        process = subprocess.Popen(
-            [sys.executable, local_script_path, params_path],
-            cwd=os.path.dirname(local_script_path),
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        log_handle.close()
-
-        return SimpleNamespace(
-            job_id=str(process.pid),
-            log_file=log_file,
-            mode="local",
-        )
-
     job = step_manager.ClusterJob(
         step_properties["script"],
         pipe_utils.windows_to_linux_path(params_path),
@@ -187,6 +156,21 @@ def _display_local_analysis_status(step_name, job_id, last_known_state):
         st.code(logs, language="text")
 
 
+def _render_cluster_analysis_logs(job, state):
+    if state not in (consts.JOB_FAILED, consts.JOB_FINISHED):
+        return
+
+    try:
+        logs = job.get_job_logs()
+    except Exception as e:
+        st.caption(f"Could not load analysis log: {e}")
+        return
+
+    joined_logs = "\n".join(row for row in logs if row).strip()
+    if joined_logs:
+        st.code(joined_logs, language="text")
+
+
 def display_analysis_status():
     step_name = st.session_state.get(ANALYSIS_STATUS_STEP_KEY, "")
     job_id = st.session_state.get(ANALYSIS_STATUS_JOB_ID_KEY)
@@ -239,6 +223,7 @@ def display_analysis_status():
     elif state in (consts.JOB_FAILED, consts.JOB_CANCELLD):
         st.session_state[ANALYSIS_STATUS_STATE_KEY] = "failed"
         st.error(f"{step_label} status: failed (job {job_id})")
+        _render_cluster_analysis_logs(job, state)
     else:
         st.caption(f"{step_label} status: {state} (job {job_id})")
 
