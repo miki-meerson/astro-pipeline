@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH -J PB
+#SBATCH -J STA
 #SBATCH --constraint=avx
 #SBATCH -N 1
-#SBATCH -c 4
-#SBATCH -t 0-1:00:00
-#SBATCH --mem=32G
+#SBATCH -c 16
+#SBATCH -t 0-4:00:00
+#SBATCH --mem=128G
 #SBATCH --mail-type=END
 
 PARAMS_FILE=${1:-"None"}
@@ -15,4 +15,4 @@ echo "bashrc sourced"
 . ${HOME}/miniconda3/bin/activate caiman
 echo "caiman env activated"
 
-python photobleaching_correction.py "$PARAMS_FILE"
+python -u sta_clustering.py "$PARAMS_FILE"

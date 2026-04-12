@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH -J S2P
+#SBATCH --constraint=avx
 #SBATCH -N 1
 #SBATCH -c 16
 #SBATCH -t 0-4:00:00
