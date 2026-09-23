@@ -19,13 +19,19 @@ def extract_params(gui_param_path):
         gui_params = json.load(fp)
 
     raw_video_path = gui_params[consts.RAW_VIDEO_PATH_LINUX]
-    fr = pipe_utils.get_frame_rate(raw_video_path)
 
     pipeline_dir = pipe_utils.get_pipeline_results_dir(raw_video_path)
     gui_time = gui_params[consts.GUI_TIME]
-    trimmed = gui_params.get(consts.TRIMMED, 0)
+    fit_start_frame = gui_params.get(
+        consts.PB_FIT_START_FRAME,
+        gui_params.get(consts.TRIMMED, 0)
+    )
+    fit_end_frame = gui_params.get(consts.PB_FIT_END_FRAME, None)
     mc_dir = os.path.join(pipeline_dir, consts.MC_DIR)
     split_2ch_flag = gui_params.get(consts.IS_2CH, False)
+
+    is2p = "hyp" in str(raw_video_path).lower()
+    fr = pipe_utils.get_frame_rate(raw_video_path, is2p=is2p)
 
     if split_2ch_flag:
         channels = ["neuron", "astro"]
@@ -39,64 +45,73 @@ def extract_params(gui_param_path):
             "full": os.path.join(mc_dir, consts.MC_VIDEO_PATH)
         }
 
-    return raw_video_path, mc_video_paths, channels, gui_time, fr, trimmed
+    return raw_video_path, mc_video_paths, channels, gui_time, fr, fit_start_frame, fit_end_frame
 
 
-def run_photobleaching_correction(fr, start_frame, stop_frame, mc_path):
-    start_frame = int(start_frame) if start_frame is not None else 0
+def run_photobleaching_correction(fr, fit_start_frame, fit_end_frame, mc_path):
+    fit_start_frame = int(fit_start_frame) if fit_start_frame is not None else 0
     mc_movie_full = tifffile.imread(mc_path)
     n_total_frames = int(mc_movie_full.shape[0])
-    if start_frame < 0:
-        start_frame = 0
-    if start_frame >= n_total_frames:
+    if fit_start_frame < 0:
+        fit_start_frame = 0
+    if fit_start_frame >= n_total_frames:
         raise ValueError(
-            f"Trimmed start_frame ({start_frame}) is outside movie length ({n_total_frames})."
+            f"Fit start frame ({fit_start_frame}) is outside movie length ({n_total_frames})."
         )
-    full_mean_trace = np.mean(mc_movie_full.reshape(n_total_frames, -1), axis=1)
-    mc_movie = mc_movie_full[start_frame:, :, :]
+    fit_end_frame = n_total_frames - 1 if fit_end_frame is None else int(fit_end_frame)
+    fit_end_frame = min(fit_end_frame, n_total_frames - 1)
+    if fit_end_frame <= fit_start_frame:
+        raise ValueError(
+            f"Fit end frame ({fit_end_frame}) must be larger than fit start frame ({fit_start_frame})."
+        )
 
-    n_frames = mc_movie.shape[0]
-    Y = mc_movie.reshape(n_frames, -1)
+    n_frames = n_total_frames
+    Y = mc_movie_full.reshape(n_frames, -1)
 
-    stop = n_frames if stop_frame is None else int(stop_frame)
+    fit_slice = slice(fit_start_frame, fit_end_frame + 1)
+    n_fit = fit_end_frame - fit_start_frame + 1
+    if n_fit < 3:
+        raise ValueError("Photobleaching fit range must contain at least 3 frames.")
 
     # Mean trace across all pixels
     p = np.mean(Y, axis=1)
-    frame_idx = np.arange(start_frame, start_frame + n_frames, dtype=np.int64)
-    t_rel = np.arange(n_frames, dtype=np.float64) / fr
+    full_mean_trace = p
+    frame_idx = np.arange(n_frames, dtype=np.int64)
     t_abs = frame_idx / fr
+    t_fit = (frame_idx[fit_slice] - fit_start_frame) / fr
 
     # Fitting range
-    q = p[:stop]
-    n_fit = len(q)
+    q = p[fit_slice]
 
     # Initial parameter guesses
     offs = np.mean(q[int(0.75 * n_fit):])
-    amp = np.mean(q[:int(0.25 * n_fit)]) - offs
+    early_window = max(1, int(0.25 * n_fit))
+    amp = np.mean(q[:early_window]) - offs
     tau_init = 1000.0
 
     # Exponential function
     def expf(tt, c, a, tau):
         return c + a * np.exp(-tt / tau)
 
-    # Fit parameters [offset, amplitude, tau] on time relative to trimmed start
+    # Fit parameters [offset, amplitude, tau] on time relative to the selected fit start.
     initial_params = np.array([max(offs, 0.0), max(amp, 0.0), max(tau_init, 1.0 / fr)], dtype=np.float64)
     lower_bounds = np.array([0.0, 0.0, 1.0 / fr], dtype=np.float64)
     upper_bounds = np.array([np.inf, np.inf, np.inf], dtype=np.float64)
     try:
         fitted_params, _ = curve_fit(
             expf,
-            t_rel[:stop],
-            p[:stop],
+            t_fit,
+            q,
             p0=initial_params,
             bounds=(lower_bounds, upper_bounds),
             maxfev=20000,
         )
     except Exception:
         fitted_params = initial_params
-    fitted_curve = expf(t_rel, *fitted_params)
-    fit_range = p[:stop]
-    fit_pred = fitted_curve[:stop]
+    t_full_for_fit = (frame_idx - fit_start_frame) / fr
+    fitted_curve = expf(t_full_for_fit, *fitted_params)
+    fit_range = q
+    fit_pred = fitted_curve[fit_slice]
     fit_residual = fit_range - fit_pred
     fit_denom = np.sum((fit_range - np.mean(fit_range)) ** 2)
     bleach_r2 = 1.0 - (np.sum(fit_residual ** 2) / fit_denom) if fit_denom > 0 else 0.0
@@ -112,9 +127,9 @@ def run_photobleaching_correction(fr, start_frame, stop_frame, mc_path):
     corrected_mean = np.mean(corrected_movie, axis=1)
 
     # Reshape back to original
-    corrected_movie = corrected_movie.reshape(mc_movie.shape)
+    corrected_movie = corrected_movie.reshape(mc_movie_full.shape)
 
-    slope, intercept = np.polyfit(t_rel, corrected_mean, 1)
+    slope, intercept = np.polyfit(t_abs, corrected_mean, 1)
     eps = np.finfo(np.float32).eps
     f0 = np.percentile(corrected_mean, 20)
     if abs(f0) < eps:
@@ -127,7 +142,9 @@ def run_photobleaching_correction(fr, start_frame, stop_frame, mc_path):
         dff_skewness = float(np.mean((dff_centered / dff_std) ** 3))
 
     qc_metrics = {
-        consts.TRIMMED: int(start_frame),
+        consts.TRIMMED: int(fit_start_frame),
+        consts.PB_FIT_START_FRAME: int(fit_start_frame),
+        consts.PB_FIT_END_FRAME: int(fit_end_frame),
         consts.BLEACH_TAU: float(fitted_params[2]),
         consts.BLEACH_C: float(fitted_params[0]),
         consts.BLEACH_R2: float(bleach_r2),
@@ -143,7 +160,9 @@ def run_photobleaching_correction(fr, start_frame, stop_frame, mc_path):
     pb_correct_dict["corrected_mean"] = corrected_mean
     pb_correct_dict["frame_idx"] = frame_idx
     pb_correct_dict["time_sec"] = t_abs
-    pb_correct_dict["corrected_mean_fit_line"] = slope * t_rel + intercept
+    pb_correct_dict["fit_start_frame"] = int(fit_start_frame)
+    pb_correct_dict["fit_end_frame"] = int(fit_end_frame)
+    pb_correct_dict["corrected_mean_fit_line"] = slope * t_abs + intercept
     pb_correct_dict["qc_metrics"] = qc_metrics
 
     return corrected_movie, pb_correct_dict
@@ -170,7 +189,9 @@ def save_pb_correct_data(pipeline_dir, movie_clean, pb_correct_dict, raw_video_p
         fitted_curve=pb_correct_dict["fitted_curve"],
         A=pb_correct_dict["A"],
         tau=pb_correct_dict["tau"],
-        C=pb_correct_dict["C"]
+        C=pb_correct_dict["C"],
+        fit_start_frame=pb_correct_dict["fit_start_frame"],
+        fit_end_frame=pb_correct_dict["fit_end_frame"]
     )
 
 
@@ -189,7 +210,8 @@ def save_pb_qc(pipeline_dir, pb_correct_dict, channel_name=None):
     corrected_mean = pb_correct_dict["corrected_mean"]
     fitted_curve = pb_correct_dict["fitted_curve"]
     corrected_fit_line = pb_correct_dict["corrected_mean_fit_line"]
-    trimmed = int(pb_correct_dict["qc_metrics"].get(consts.TRIMMED, 0))
+    fit_start = int(pb_correct_dict["qc_metrics"].get(consts.PB_FIT_START_FRAME, 0))
+    fit_end = int(pb_correct_dict["qc_metrics"].get(consts.PB_FIT_END_FRAME, len(frame_idx) - 1))
 
     fig, ax = plt.subplots(figsize=(10, 5))
     if full_original_mean is not None:
@@ -202,16 +224,17 @@ def save_pb_qc(pipeline_dir, pb_correct_dict, channel_name=None):
             alpha=0.35,
             color="gray",
         )
-        if trimmed > 0:
-            ax.axvline(trimmed, color="black", linestyle=":", linewidth=1.0, alpha=0.9, label="Trim start")
 
     ax.plot(frame_idx, original_mean, label="Original mean intensity", linewidth=1.5)
     ax.plot(frame_idx, fitted_curve, label="Fitted exponential", linewidth=1.5)
     ax.plot(frame_idx, corrected_mean, label="Corrected mean intensity", linewidth=1.5)
     ax.plot(frame_idx, corrected_fit_line, label="Corrected linear fit", linewidth=1.2, linestyle="--")
+    ax.axvspan(fit_start, fit_end, color="tab:orange", alpha=0.12, label="Fit range")
+    ax.axvline(fit_start, color="black", linestyle=":", linewidth=1.0, alpha=0.9)
+    ax.axvline(fit_end, color="black", linestyle=":", linewidth=1.0, alpha=0.9)
     ax.set_xlabel("Frame")
     ax.set_ylabel("Intensity (a.u.)")
-    ax.set_title(f"Photobleaching QC (trimmed first {trimmed} frames)")
+    ax.set_title(f"Photobleaching QC (fit frames {fit_start}-{fit_end}, corrected full movie)")
     ax.legend(loc="best")
     ax.grid(alpha=0.25)
     fig.tight_layout()
@@ -222,7 +245,7 @@ def save_pb_qc(pipeline_dir, pb_correct_dict, channel_name=None):
 
 def main(args):
     gui_params_path = args[1]
-    raw_video_path, mc_video_paths, channels, gui_time, fr, trimmed = extract_params(gui_params_path)
+    raw_video_path, mc_video_paths, channels, gui_time, fr, fit_start_frame, fit_end_frame = extract_params(gui_params_path)
     print("GUI TIME:", gui_time)
     pipeline_dir = pipe_utils.get_pipeline_results_dir(raw_video_path)
 
@@ -232,8 +255,8 @@ def main(args):
 
         movie_clean, pb_correct_dict = run_photobleaching_correction(
             fr,
-            start_frame=trimmed,
-            stop_frame=None,
+            fit_start_frame=fit_start_frame,
+            fit_end_frame=fit_end_frame,
             mc_path=mc_video_path
         )
 

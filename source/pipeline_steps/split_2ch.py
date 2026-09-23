@@ -14,7 +14,7 @@ def extract_params(gui_param_path):
         gui_params = json.load(fp)
 
     raw_video_path = gui_params[consts.RAW_VIDEO_PATH_LINUX]
-    fr = pipe_utils.get_frame_rate(raw_video_path)
+    fr = pipe_utils.get_frame_rate(raw_video_path, is2p=True)
     pipeline_dir = pipe_utils.get_pipeline_results_dir(raw_video_path)
     gui_time = gui_params[consts.GUI_TIME]
 

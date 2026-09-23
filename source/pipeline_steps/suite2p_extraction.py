@@ -14,7 +14,8 @@ def extract_params(gui_param_path):
     raw_video_path = gui_params[consts.RAW_VIDEO_PATH_LINUX]
     pipeline_dir = pipe_utils.get_pipeline_results_dir(raw_video_path)
     gui_time = gui_params[consts.GUI_TIME]
-    fr = pipe_utils.get_frame_rate(raw_video_path)
+    
+    fr = pipe_utils.get_frame_rate(raw_video_path, is2p=True)
 
     pb_dir = os.path.join(pipeline_dir, consts.PB_DIR)
     suite2p_dir = os.path.join(pipeline_dir, consts.S2P_DIR)

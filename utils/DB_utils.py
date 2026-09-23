@@ -21,6 +21,8 @@ STD_SHIFT = "std_shift"
 
 ### photobleaching metrics - I(t)=A⋅e^(−t/τ)+C, corrected_mean(t)=mt+b ###
 TRIMMED = "trimmed"
+PB_FIT_START_FRAME = "pb_fit_start_frame"
+PB_FIT_END_FRAME = "pb_fit_end_frame"
 BLEACH_TAU = "bleach_tau"
 BLEACH_C = "bleach_C"
 BLEACH_R2 = "bleach_r2"

@@ -31,9 +31,11 @@ def extract_params(gui_param_path):
         gui_params = json.load(fp)
     video_path = gui_params[consts.RAW_VIDEO_PATH_LINUX]
     gui_time = gui_params[consts.GUI_TIME]
-    fr = pipe_utils.get_frame_rate(video_path)
-    mc_dict = extract_mc_params(gui_params, fr)
     split_2ch_flag = gui_params.get(consts.IS_2CH, False)
+
+    is2p = "hyp" in str(video_path).lower()
+    fr = pipe_utils.get_frame_rate(video_path, is2p=is2p)
+    mc_dict = extract_mc_params(gui_params, fr)
     return video_path, gui_time, mc_dict, split_2ch_flag
 
 

@@ -57,12 +57,15 @@ def get_experiment_xml_path(raw_path):
     """
     return os.path.join(os.path.split(raw_path)[0],'Experiment.xml')
 
-def get_frame_rate(raw_path):
+def get_frame_rate(raw_path, is2p):
     xml_path = get_experiment_xml_path(raw_path)
     xml_data = open(xml_path,"r").read()
     xml_dict = xmltodict.parse(xml_data)
-    exposure_time = float(xml_dict["ThorImageExperiment"]["Camera"]["@exposureTimeMS"])
-    fr = np.round(1000/exposure_time).astype(int)
+    if is2p:
+        fr = float(xml_dict["ThorImageExperiment"]["LSM"]["@frameRate"])
+    else:
+        exposure_time = float(xml_dict["ThorImageExperiment"]["Camera"]["@exposureTimeMS"])
+        fr = np.round(1000/exposure_time).astype(int)
     return fr
 
 

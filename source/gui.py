@@ -30,6 +30,8 @@ PCA_PARAMS_TITLE = "**PCA Parameters**"
 MAX_TRACE_POINTS = 1200
 SPATIAL_DOWNSAMPLE = 8
 IS_2CH_USER_KEY = "_is_2ch_user_selected"
+PB_FIT_START_INPUT_KEY = "_pb_fit_start_frame_input"
+PB_FIT_END_INPUT_KEY = "_pb_fit_end_frame_input"
 
 ########## initialization ###########
 class GUI_parameter:
@@ -121,6 +123,10 @@ def init_session_state():
             st.session_state[k] = v
     if consts.TRIMMED not in st.session_state:
         st.session_state[consts.TRIMMED] = 0
+    if consts.PB_FIT_START_FRAME not in st.session_state:
+        st.session_state[consts.PB_FIT_START_FRAME] = 0
+    if consts.PB_FIT_END_FRAME not in st.session_state:
+        st.session_state[consts.PB_FIT_END_FRAME] = 0
     if consts.PB_TRACE_LOADED not in st.session_state:
         st.session_state[consts.PB_TRACE_LOADED] = False
     if "_pipeline_defaults_initialized" not in st.session_state:
@@ -170,6 +176,9 @@ def _refresh_2ch_mode_and_step_defaults(force=False):
 def _on_raw_video_path_change():
     st.session_state[consts.PB_TRACE_LOADED] = False
     st.session_state.pop(consts.TRIMMED_SLIDER, None)
+    st.session_state.pop(consts.PB_FIT_RANGE_SLIDER, None)
+    st.session_state.pop(PB_FIT_START_INPUT_KEY, None)
+    st.session_state.pop(PB_FIT_END_INPUT_KEY, None)
     raw_path = st.session_state.get(consts.RAW_VIDEO_PATH, "")
     if _path_indicates_2ch(raw_path):
         st.session_state[IS_2CH_USER_KEY] = True
@@ -204,12 +213,24 @@ def display_mc_params():
 def display_pb_params():
     with st.expander(PB_PARAMS_TITLE):
         raw_path = st.session_state.get(consts.RAW_VIDEO_PATH, "")
+        if PB_FIT_START_INPUT_KEY not in st.session_state:
+            st.session_state[PB_FIT_START_INPUT_KEY] = int(st.session_state.get(consts.PB_FIT_START_FRAME, 0))
+        if PB_FIT_END_INPUT_KEY not in st.session_state:
+            st.session_state[PB_FIT_END_INPUT_KEY] = int(st.session_state.get(consts.PB_FIT_END_FRAME, 0))
+
         st.number_input(
-            consts.TRIMMED,
-            key=consts.TRIMMED,
+            "Fit start frame",
+            key=PB_FIT_START_INPUT_KEY,
             min_value=0,
             step=1,
-            on_change=_sync_slider_from_input
+            on_change=_sync_fit_range_from_number_inputs
+        )
+        st.number_input(
+            "Fit end frame",
+            key=PB_FIT_END_INPUT_KEY,
+            min_value=0,
+            step=1,
+            on_change=_sync_fit_range_from_number_inputs
         )
 
         if not raw_path or not os.path.exists(raw_path):
@@ -232,22 +253,37 @@ def display_pb_params():
                 )
 
             max_frame = max(0, n_frames - 1)
-            current_trimmed = int(st.session_state.get(consts.TRIMMED, 3000))
-            current_trimmed = max(0, min(current_trimmed, max_frame))
+            current_start = int(st.session_state.get(consts.PB_FIT_START_FRAME, 0))
+            current_end = int(st.session_state.get(consts.PB_FIT_END_FRAME, max_frame))
+            current_start = max(0, min(current_start, max_frame))
+            current_end = max(0, min(current_end, max_frame))
+            if current_end <= current_start:
+                current_end = max_frame
 
-            if consts.TRIMMED_SLIDER not in st.session_state:
-                st.session_state[consts.TRIMMED_SLIDER] = current_trimmed
-            st.session_state[consts.TRIMMED_SLIDER] = max(0, min(int(st.session_state[consts.TRIMMED_SLIDER]), max_frame))
+            st.session_state[consts.TRIMMED] = current_start
 
-            selected_frame = st.slider(
-                "Trim first frames",
+            if consts.PB_FIT_RANGE_SLIDER not in st.session_state:
+                st.session_state[consts.PB_FIT_RANGE_SLIDER] = (current_start, current_end)
+            slider_start, slider_end = st.session_state[consts.PB_FIT_RANGE_SLIDER]
+            slider_start = max(0, min(int(slider_start), max_frame))
+            slider_end = max(0, min(int(slider_end), max_frame))
+            if slider_end <= slider_start:
+                slider_end = max_frame
+            st.session_state[consts.PB_FIT_RANGE_SLIDER] = (slider_start, slider_end)
+
+            selected_start, selected_end = st.slider(
+                "Fit exponential on frame range",
                 min_value=0,
                 max_value=max_frame,
                 step=1,
-                key=consts.TRIMMED_SLIDER,
-                on_change=_sync_input_from_slider
+                key=consts.PB_FIT_RANGE_SLIDER,
+                on_change=_sync_inputs_from_fit_range_slider
             )
-            selected_frame = int(selected_frame)
+            selected_start = int(selected_start)
+            selected_end = int(selected_end)
+            st.session_state[consts.PB_FIT_START_FRAME] = selected_start
+            st.session_state[consts.PB_FIT_END_FRAME] = selected_end
+            st.session_state[consts.TRIMMED] = selected_start
 
             trace_df = pd.DataFrame({
                 "frame": sampled_frames.astype(int),
@@ -255,12 +291,15 @@ def display_pb_params():
             }).set_index("frame")
             st.line_chart(trace_df)
 
-            nearest_idx = int(np.argmin(np.abs(sampled_frames - selected_frame)))
-            selected_mean = float(sampled_mean[nearest_idx])
-            removed_pct = (selected_frame / max(1, n_frames - 1)) * 100.0
+            start_nearest_idx = int(np.argmin(np.abs(sampled_frames - selected_start)))
+            end_nearest_idx = int(np.argmin(np.abs(sampled_frames - selected_end)))
+            start_mean = float(sampled_mean[start_nearest_idx])
+            end_mean = float(sampled_mean[end_nearest_idx])
+            fit_pct = ((selected_end - selected_start + 1) / max(1, n_frames)) * 100.0
             st.caption(
-                f"Selected trim frame: {selected_frame} / {n_frames - 1} "
-                f"(~{removed_pct:.1f}% removed), mean intensity near selection: {selected_mean:.2f}"
+                f"Fit range: frames {selected_start}-{selected_end} / {n_frames - 1} "
+                f"(~{fit_pct:.1f}% of movie). Mean intensity near start/end: "
+                f"{start_mean:.2f} / {end_mean:.2f}. Correction will be applied to the full movie."
             )
         except Exception as e:
             st.warning(f"Could not compute mean-intensity trace: {e}")
@@ -278,15 +317,27 @@ def _compute_mean_trace(raw_path, _mtime, _size):
     raise ValueError("Unsupported file format. Use .raw or .tif/.tiff")
 
 
-def _sync_input_from_slider():
-    if consts.TRIMMED_SLIDER in st.session_state:
-        st.session_state[consts.TRIMMED] = int(st.session_state[consts.TRIMMED_SLIDER])
+def _sync_inputs_from_fit_range_slider():
+    if consts.PB_FIT_RANGE_SLIDER in st.session_state:
+        fit_start, fit_end = st.session_state[consts.PB_FIT_RANGE_SLIDER]
+        st.session_state[consts.PB_FIT_START_FRAME] = int(fit_start)
+        st.session_state[consts.PB_FIT_END_FRAME] = int(fit_end)
+        st.session_state[PB_FIT_START_INPUT_KEY] = int(fit_start)
+        st.session_state[PB_FIT_END_INPUT_KEY] = int(fit_end)
+        st.session_state[consts.TRIMMED] = int(fit_start)
 
 
-def _sync_slider_from_input():
-    trimmed_value = int(st.session_state.get(consts.TRIMMED, 0))
-    if consts.TRIMMED_SLIDER in st.session_state:
-        st.session_state[consts.TRIMMED_SLIDER] = max(0, trimmed_value)
+def _sync_fit_range_from_number_inputs():
+    fit_start = int(st.session_state.get(PB_FIT_START_INPUT_KEY, 0))
+    fit_end = int(st.session_state.get(PB_FIT_END_INPUT_KEY, fit_start))
+    if fit_end < fit_start:
+        fit_end = fit_start
+        st.session_state[PB_FIT_END_INPUT_KEY] = fit_end
+    st.session_state[consts.PB_FIT_START_FRAME] = max(0, fit_start)
+    st.session_state[consts.PB_FIT_END_FRAME] = max(0, fit_end)
+    if consts.PB_FIT_RANGE_SLIDER in st.session_state:
+        st.session_state[consts.PB_FIT_RANGE_SLIDER] = (max(0, fit_start), max(0, fit_end))
+    st.session_state[consts.TRIMMED] = max(0, fit_start)
 
 
 def _mean_trace_from_raw(raw_path):
@@ -340,6 +391,9 @@ def choose_file():
         st.session_state[consts.RAW_VIDEO_PATH] = path
         st.session_state["pb_trace_loaded"] = False
         st.session_state.pop(consts.TRIMMED_SLIDER, None)
+        st.session_state.pop(consts.PB_FIT_RANGE_SLIDER, None)
+        st.session_state.pop(PB_FIT_START_INPUT_KEY, None)
+        st.session_state.pop(PB_FIT_END_INPUT_KEY, None)
         if _path_indicates_2ch(path):
             st.session_state[IS_2CH_USER_KEY] = True
         _refresh_2ch_mode_and_step_defaults(force=False)
@@ -478,6 +532,13 @@ def _create_gui_params(gui_params):
     gui_params[consts.RAW_VIDEO_PATH_LINUX] = pipe_utils.windows_to_linux_path(gui_params[consts.RAW_VIDEO_PATH])
     gui_params[consts.HOME_DIR_LINUX] = os.path.split(gui_params[consts.RAW_VIDEO_PATH_LINUX])[0]
     gui_params[consts.HOME_DIR] = os.path.split(gui_params[consts.RAW_VIDEO_PATH])[0]
+    fit_start = int(gui_params.get(consts.PB_FIT_START_FRAME, gui_params.get(consts.TRIMMED, 0)))
+    fit_end = gui_params.get(consts.PB_FIT_END_FRAME, None)
+    gui_params[consts.PB_FIT_START_FRAME] = max(0, fit_start)
+    if fit_end is not None and int(fit_end) <= fit_start:
+        fit_end = None
+    gui_params[consts.PB_FIT_END_FRAME] = fit_end
+    gui_params[consts.TRIMMED] = max(0, fit_start)
     return gui_params
 
 
